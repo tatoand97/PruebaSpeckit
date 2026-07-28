@@ -1,9 +1,14 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.Hosting.Server;
+using Microsoft.AspNetCore.Hosting.Server.Features;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Orders.Api.Tests;
 
@@ -309,6 +314,164 @@ public sealed partial class ApiContractTests
         }
     }
 
+    [TestMethod]
+    [TestCategory("Contract")]
+    [TestCategory("OpenApi")]
+    public void OpenApi_differential_audit_matches_the_three_runtime_operations_and_closed_schemas()
+    {
+        var contractPath = Path.Combine(
+            FindRepositoryRoot(),
+            "specs",
+            "001-create-query-orders",
+            "contracts",
+            "openapi.yaml");
+        var contract = File.ReadAllText(contractPath);
+        Assert.AreEqual(
+            2,
+            Regex.Matches(contract, @"(?m)^  /orders(?:/\{orderId\})?:$").Count);
+        Assert.AreEqual(3, Regex.Matches(contract, @"(?m)^    (?:post|get):$").Count);
+
+        var postStart = contract.IndexOf("    post:", StringComparison.Ordinal);
+        var missingGetStart = contract.IndexOf("    get:", postStart, StringComparison.Ordinal);
+        var orderPathStart = contract.IndexOf("  /orders/{orderId}:", StringComparison.Ordinal);
+        var orderGetStart = contract.IndexOf("    get:", orderPathStart, StringComparison.Ordinal);
+        Assert.IsTrue(postStart >= 0 && missingGetStart > postStart);
+        Assert.IsTrue(orderPathStart > missingGetStart && orderGetStart > orderPathStart);
+
+        AssertStatusSet(
+            contract[postStart..missingGetStart],
+            "201",
+            "400",
+            "413",
+            "415",
+            "500",
+            "503");
+        AssertStatusSet(contract[missingGetStart..orderPathStart], "400", "500");
+        AssertStatusSet(
+            contract[orderGetStart..contract.IndexOf("components:", StringComparison.Ordinal)],
+            "200",
+            "400",
+            "404",
+            "500",
+            "503");
+
+        StringAssert.Contains(contract, "application/json:");
+        StringAssert.Contains(contract, "application/problem+json:");
+        StringAssert.Contains(contract, "Location:");
+        Assert.IsFalse(Regex.IsMatch(contract, @"(?m)^\s+Retry-After:"));
+        StringAssert.Contains(contract, "additionalProperties: true");
+        Assert.IsTrue(
+            Regex.Matches(contract, @"(?m)^\s+additionalProperties: false$").Count >= 5);
+        StringAssert.Contains(contract, "required:\n        - orderId\n        - status");
+        StringAssert.Contains(
+            contract,
+            "required:\n        - orderId\n        - customerId\n        - items\n        - status");
+        StringAssert.Contains(contract, "x-idempotency: deliberately-not-supported");
+        StringAssert.Contains(contract, "GET /orders nunca enumera");
+        StringAssert.Contains(contract, "problemDetailsGuaranteed: false");
+        StringAssert.Contains(contract, "host/router no asigne");
+        StringAssert.Contains(contract, "propertyNames:");
+        StringAssert.Contains(contract, "traceId");
+
+        // Runtime evidence is deliberately split across the T016, T021 and T027
+        // methods above; this audit adds only the static differential assertions.
+    }
+
+    [TestMethod]
+    [TestCategory("Contract")]
+    [TestCategory("HostBoundary")]
+    public async Task Real_kestrel_enforces_one_mib_without_truncating_the_exact_large_valid_fixture()
+    {
+        const int targetValidBytes = 1_040_000;
+        const int maximumBodyBytes = 1_048_576;
+        const int itemCount = 12_000;
+        using var storage = TestStorage.Create();
+        await using var factory = new OrdersApiFactory(storage.DatabasePath);
+        factory.UseKestrel(0);
+        using var client = factory.CreateClient(
+            new WebApplicationFactoryClientOptions
+            {
+                AllowAutoRedirect = false
+            });
+        var server = factory.Services.GetRequiredService<IServer>();
+        var serverAddress = server.Features.Get<IServerAddressesFeature>()?.Addresses.Single()
+            ?? throw new AssertFailedException("Kestrel did not publish one loopback address.");
+        client.BaseAddress = new Uri(serverAddress);
+
+        var productIds = Enumerable.Range(0, itemCount)
+            .Select(index => $"acceptance-large-product-{index:D5}")
+            .ToArray();
+        var serializedItems = string.Join(
+            ",",
+            productIds.Select(
+                productId =>
+                    $"{{\"productId\":\"{productId}\",\"quantity\":1}}"));
+        const string customerPrefix = "acceptance-large-customer-";
+        var bodyWithoutPadding =
+            $"{{\"customerId\":\"{customerPrefix}\",\"items\":[{serializedItems}]}}";
+        var paddingLength =
+            targetValidBytes - Encoding.UTF8.GetByteCount(bodyWithoutPadding);
+        Assert.IsTrue(paddingLength > 0);
+        var largeBody =
+            $"{{\"customerId\":\"{customerPrefix}{new string('x', paddingLength)}\",\"items\":[{serializedItems}]}}";
+        var largeBytes = Encoding.UTF8.GetBytes(largeBody);
+        Assert.AreEqual(targetValidBytes, largeBytes.Length);
+
+        using var validContent = new ByteArrayContent(largeBytes);
+        validContent.Headers.ContentType = MediaTypeHeaderValue.Parse("application/json");
+        using var validResponse = await client.PostAsync("/orders", validContent);
+        Assert.AreEqual(HttpStatusCode.Created, validResponse.StatusCode);
+        using var createdBody = JsonDocument.Parse(await validResponse.Content.ReadAsStringAsync());
+        var location = validResponse.Headers.Location?.OriginalString;
+        Assert.IsNotNull(location);
+        using var query = await client.GetAsync(location);
+        Assert.AreEqual(HttpStatusCode.OK, query.StatusCode);
+        using (var queriedBody = JsonDocument.Parse(await query.Content.ReadAsStringAsync()))
+        {
+            var queriedItems = queriedBody.RootElement.GetProperty("items");
+            Assert.AreEqual(itemCount, queriedItems.GetArrayLength());
+            Assert.AreEqual(
+                productIds[0],
+                queriedItems[0].GetProperty("productId").GetString());
+            Assert.AreEqual(
+                productIds[^1],
+                queriedItems[itemCount - 1].GetProperty("productId").GetString());
+        }
+
+        Assert.AreEqual(itemCount, CountItems(storage.DatabasePath, createdBody.RootElement.GetProperty("orderId").GetString()!));
+        var baselineOrders = AtomicityTests.CountRows(storage.DatabasePath, "orders");
+        var oversizedBytes = Encoding.UTF8.GetBytes(
+            $"\"{new string('z', maximumBodyBytes)}\"");
+        Assert.IsTrue(oversizedBytes.Length > maximumBodyBytes);
+
+        using (var fixedLengthContent = new ByteArrayContent(oversizedBytes))
+        {
+            fixedLengthContent.Headers.ContentType = MediaTypeHeaderValue.Parse("application/json");
+            using var oversizedResponse = await client.PostAsync("/orders", fixedLengthContent);
+            Assert.AreEqual(HttpStatusCode.RequestEntityTooLarge, oversizedResponse.StatusCode);
+        }
+
+        Assert.AreEqual(baselineOrders, AtomicityTests.CountRows(storage.DatabasePath, "orders"));
+
+        using (var chunkedRequest = new HttpRequestMessage(HttpMethod.Post, "/orders"))
+        {
+            chunkedRequest.Content = new ChunkedByteContent(oversizedBytes);
+            chunkedRequest.Content.Headers.ContentType =
+                MediaTypeHeaderValue.Parse("application/json");
+            chunkedRequest.Headers.TransferEncodingChunked = true;
+            using var chunkedResponse = await client.SendAsync(chunkedRequest);
+            Assert.AreEqual(HttpStatusCode.RequestEntityTooLarge, chunkedResponse.StatusCode);
+        }
+
+        Assert.AreEqual(baselineOrders, AtomicityTests.CountRows(storage.DatabasePath, "orders"));
+
+        var inconsistentResponse = await SendInconsistentLengthAsync(
+            client.BaseAddress!,
+            oversizedBytes);
+        Assert.IsFalse(inconsistentResponse.Contains(" 201 ", StringComparison.Ordinal));
+        Assert.AreEqual(baselineOrders, AtomicityTests.CountRows(storage.DatabasePath, "orders"));
+    }
+
     private static async Task AssertCreateResponse(HttpResponseMessage response)
     {
         Assert.AreEqual(HttpStatusCode.Created, response.StatusCode);
@@ -374,8 +537,103 @@ public sealed partial class ApiContractTests
         return request;
     }
 
+    private static void AssertStatusSet(string operationYaml, params string[] expected)
+    {
+        var actual = Regex.Matches(operationYaml, @"(?m)^        '(\d{3})':")
+            .Select(match => match.Groups[1].Value)
+            .ToArray();
+        CollectionAssert.AreEquivalent(expected, actual);
+    }
+
+    private static string FindRepositoryRoot()
+    {
+        var current = new DirectoryInfo(AppContext.BaseDirectory);
+        while (current is not null)
+        {
+            if (File.Exists(Path.Combine(current.FullName, "Orders.slnx")))
+            {
+                return current.FullName;
+            }
+
+            current = current.Parent;
+        }
+
+        throw new DirectoryNotFoundException("The repository root could not be located.");
+    }
+
+    private static int CountItems(string databasePath, string orderId)
+    {
+        using var connection = PersistenceTests.OpenRaw(databasePath);
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT count(*) FROM order_items WHERE order_id=$orderId;";
+        command.Parameters.AddWithValue("$orderId", orderId);
+        return checked((int)Convert.ToInt64(command.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    private static async Task<string> SendInconsistentLengthAsync(
+        Uri baseAddress,
+        byte[] oversizedBody)
+    {
+        using var tcpClient = new TcpClient();
+        await tcpClient.ConnectAsync(baseAddress.Host, baseAddress.Port);
+        await using var stream = tcpClient.GetStream();
+        var headers = Encoding.ASCII.GetBytes(
+            $"POST /orders HTTP/1.1\r\nHost: {baseAddress.Host}:{baseAddress.Port}\r\nContent-Type: application/json\r\nContent-Length: 10\r\nConnection: close\r\n\r\n");
+        await stream.WriteAsync(headers);
+        try
+        {
+            await stream.WriteAsync(oversizedBody);
+            await stream.FlushAsync();
+        }
+        catch (IOException)
+        {
+            // A protocol-level close is an acceptable rejection of inconsistent framing.
+        }
+
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var response = new MemoryStream();
+        var buffer = new byte[4096];
+        try
+        {
+            while (true)
+            {
+                var read = await stream.ReadAsync(buffer, cancellation.Token);
+                if (read == 0)
+                {
+                    break;
+                }
+
+                response.Write(buffer, 0, read);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // The absence of a successful response still proves no creation bypass.
+        }
+        catch (IOException)
+        {
+            // The host may close the malformed connection without a complete response.
+        }
+
+        return Encoding.ASCII.GetString(response.ToArray());
+    }
+
     [GeneratedRegex(
         "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
         RegexOptions.CultureInvariant)]
     private static partial Regex CanonicalUuidV4Regex();
+}
+
+internal sealed class ChunkedByteContent(byte[] bytes) : HttpContent
+{
+    protected override Task SerializeToStreamAsync(
+        Stream stream,
+        TransportContext? context) =>
+        stream.WriteAsync(bytes).AsTask();
+
+    protected override bool TryComputeLength(out long length)
+    {
+        length = 0;
+        return false;
+    }
 }

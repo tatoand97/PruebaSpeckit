@@ -109,6 +109,11 @@ app.MapPost(
             request = await context.Request.ReadFromJsonAsync<CreateOrderRequest>(
                 cancellationToken);
         }
+        catch (BadHttpRequestException exception)
+            when (exception.StatusCode == StatusCodes.Status413PayloadTooLarge)
+        {
+            return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
+        }
         catch (JsonException)
         {
             timer.Stop();
@@ -461,23 +466,20 @@ internal static class OrderLog
         string traceId,
         string? failureCategory)
     {
-        var state = new Dictionary<string, object?>(StringComparer.Ordinal)
-        {
-            ["operation"] = operation,
-            ["httpStatus"] = httpStatus,
-            ["outcome"] = outcome,
-            ["durationMs"] = Math.Max(0, durationMs),
-            ["traceId"] = traceId,
-            ["failureCategory"] = failureCategory
-        };
+        var state = new OrderLogState(
+            operation,
+            httpStatus,
+            outcome,
+            durationMs,
+            traceId,
+            failureCategory);
 
         logger.Log(
             level,
             new EventId(EventIdFor(operation), operation),
             state,
             null,
-            static (values, _) =>
-                $"{values["operation"]} {values["outcome"]} {values["httpStatus"]}");
+            static (values, _) => values.ToString());
     }
 
     private static int EventIdFor(string operation) =>
@@ -489,6 +491,43 @@ internal static class OrderLog
             "reject_missing_order_id" => 1003,
             _ => 1099
         };
+}
+
+internal sealed class OrderLogState : IReadOnlyList<KeyValuePair<string, object?>>
+{
+    private readonly KeyValuePair<string, object?>[] _values;
+
+    internal OrderLogState(
+        string operation,
+        int? httpStatus,
+        string outcome,
+        double durationMs,
+        string traceId,
+        string? failureCategory)
+    {
+        _values =
+        [
+            new("operation", operation),
+            new("httpStatus", httpStatus),
+            new("outcome", outcome),
+            new("durationMs", Math.Max(0, durationMs)),
+            new("traceId", traceId),
+            new("failureCategory", failureCategory)
+        ];
+    }
+
+    public int Count => _values.Length;
+
+    public KeyValuePair<string, object?> this[int index] => _values[index];
+
+    public IEnumerator<KeyValuePair<string, object?>> GetEnumerator() =>
+        ((IEnumerable<KeyValuePair<string, object?>>)_values).GetEnumerator();
+
+    System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() =>
+        _values.GetEnumerator();
+
+    public override string ToString() =>
+        $"{_values[0].Value} {_values[2].Value} {_values[1].Value}";
 }
 
 public partial class Program;
