@@ -4,45 +4,64 @@
 
 **Source of truth**: [spec.md](./spec.md)
 
-El modelo contiene únicamente `Order` y `OrderItem`. `Cliente` no se persiste como entidad: en esta
-feature sólo existe `Order.customerId`.
+El modelo persistente contiene únicamente `Order` y `OrderItem`. `Cliente` y `Producto` no son
+entidades administradas: sólo existen los valores opacos `customerId` y `productId`.
+
+## Transport input before semantic validation
+
+El DTO de `POST /orders` mantiene referencias y `quantity` anulables para distinguir documentos
+deserializables de modelos de dominio válidos:
+
+| Field | Transport type | Why nullable |
+|---|---|---|
+| `customerId` | `string?` | missing/null se acumula como regla semántica |
+| `items` | collection of nullable item inputs or null | missing/null/element null se informa por ruta |
+| `items[n].productId` | `string?` | missing/null se acumula junto con otras reglas |
+| `items[n].quantity` | `Int64?` | missing/null se distingue de `0`; tipo/rango falla en JSON |
+
+Un body ausente, top-level `null`, JSON malformado, tipo incorrecto, número fuera de `Int64`,
+fracción, exponente o propiedad repetida no produce este DTO: termina como `400 invalid-body`.
+Propiedades desconocidas se ignoran y no pasan al dominio.
 
 ## Order
 
-Representa una orden aceptada y confirmada completamente.
+Representa una orden aceptada, persistida completamente y confirmada.
 
 | Field | Type | Required | Rules |
 |---|---|---:|---|
-| `orderId` | string (UUID v4 en formato `D`) | yes | Generado por el sistema; no vacío; único globalmente entre órdenes retenidas; opaco para clientes; no incorpora contenido de la orden. |
-| `customerId` | string | yes | Contiene al menos un carácter que no sea whitespace; se conserva exactamente, sin trim, cambio de case ni normalización; no se comprueba contra catálogo. |
-| `status` | enum/string | yes | Único valor permitido en esta feature: `Pending`. |
-| `items` | collection of `OrderItem` | yes | Al menos un elemento; cada `productId` aparece una sola vez por orden. |
+| `orderId` | string (UUID v4 `D`) | yes | Generado; pattern canónico lower-case; único entre órdenes retenidas; opaco; no incorpora datos. |
+| `customerId` | string | yes | Al menos un carácter no-whitespace; preservado sin trim, case-fold o normalización; catálogo no consultado. |
+| `status` | enum/string | yes | Único valor permitido: `Pending`. |
+| `items` | collection of `OrderItem` | yes | Uno o más; un `productId` por igualdad ordinal dentro de la orden. |
 
 ### Identity
 
-`orderId` es la identidad de la orden y la primary key de persistencia. Se genera con
-`Guid.NewGuid()` y se confirma contra la restricción única de SQLite antes de exponerse.
+`orderId` es la primary key. Se genera con UUID v4 y sólo se expone después del commit. SQLite,
+no la probabilidad del generador, es la garantía definitiva:
+
+1. generar UUID;
+2. intentar transacción;
+3. colisión de `orders.order_id` → rollback;
+4. repetir hasta tres intentos totales;
+5. tercera colisión → rollback, `500` genérico, cero orden confirmada.
 
 ### State
 
-- Initial state: `Pending`.
-- Transitions: ninguna dentro del alcance.
-- Modification, cancellation, deletion and archival: fuera del alcance.
+- Initial and only state: `Pending`.
+- Transitions: none in scope.
+- Modification, cancellation, deletion and archival: out of scope.
 
 ## OrderItem
 
-Representa un producto y cantidad aceptados dentro de una orden.
+Representa un producto/cantidad confirmado dentro de una orden.
 
 | Field | Type | Required | Rules |
 |---|---|---:|---|
-| `orderId` | string | yes | Foreign key a la orden propietaria; parte de la identidad persistente. |
-| `productId` | string | yes | Contiene al menos un carácter no-whitespace; se conserva exactamente; no se valida contra catálogo; único dentro de la orden mediante comparación ordinal exacta. |
-| `quantity` | signed 64-bit integer | yes | Mayor que cero; debe poder representarse exactamente; nunca se trunca, redondea ni consolida. |
+| `orderId` | string | yes | Foreign key a la orden y parte de la identidad persistente. |
+| `productId` | string | yes | No-whitespace; preservado; no lookup; único por comparación ordinal exacta. |
+| `quantity` | signed 64-bit integer | yes | `1..Int64.MaxValue`; JSON original debió ser entero sin fracción/exponente; nunca se convierte, trunca o consolida. |
 
-### Identity
-
-La identidad de un elemento es la clave compuesta (`orderId`, `productId`). No se añade un
-identificador sustituto porque ninguna operación lo requiere.
+La identidad es (`orderId`, `productId`); no existe surrogate key.
 
 ## Relationships
 
@@ -50,13 +69,13 @@ identificador sustituto porque ninguna operación lo requiere.
 Order (1) ─── owns ─── (1..*) OrderItem
 ```
 
-- Cada `OrderItem` pertenece exactamente a una `Order`.
-- Una `Order` no puede existir de forma confirmada sin al menos un `OrderItem`.
-- No hay entidad o foreign key `Customer` ni `Product`; sus identificadores son valores opacos.
-- El orden de los elementos en la colección no tiene semántica de negocio definida y no forma parte
-  de la identidad.
+- Cada item pertenece a exactamente una orden.
+- Una orden confirmada nunca existe sin items.
+- No hay foreign key a Customer/Product.
+- El orden de `items` no tiene semántica de negocio, no forma parte de identidad y el contrato no
+  promete una posición estable. Sí se preservan todos los pares `productId`/`quantity`.
 
-## Relational mapping
+## Relational mapping (schema version 1)
 
 ### `orders`
 
@@ -74,40 +93,74 @@ Order (1) ─── owns ─── (1..*) OrderItem
 | `product_id` | `TEXT` | `NOT NULL`, `COLLATE BINARY`, `CHECK(length(product_id) > 0)` |
 | `quantity` | `INTEGER` | `NOT NULL`, `CHECK(quantity > 0)` |
 
-Primary key: (`order_id`, `product_id`).
+Primary key: (`order_id`, `product_id`). Foreign-key delete behavior is `NO ACTION`; deletion is
+fuera de alcance.
 
-Ambas tablas se crean en modo `STRICT`. La validación C# sigue siendo responsable de la regla
-Unicode completa de whitespace; los checks SQL son defensa adicional, no sustituto.
+Ambas tablas son `STRICT`. `COLLATE BINARY` y parámetros de texto conservan comparación exacta en
+persistencia; C# y SQLite no hacen trim, case-fold ni normalización Unicode. Los `CHECK(length)>0`
+son defensa mínima; `string.IsNullOrWhiteSpace` sigue siendo la regla completa del boundary.
+
+## Schema initialization and connection invariants
+
+- Startup transaction creates schema v1 only when absent and sets `PRAGMA user_version=1`.
+- Existing storage must report schema v1, required tables/columns, `quick_check=ok` and no rows from
+  `foreign_key_check`; otherwise startup fails instead of mutating un esquema desconocido.
+- Startup sets/verifies WAL. Every connection applies `foreign_keys=ON`, `synchronous=FULL` and
+  `busy_timeout=500`.
+- Writers use `BEGIN IMMEDIATE`; each HTTP operation owns one connection and no ADO.NET object is
+  shared across threads.
+- Main DB and active WAL sidecars must stay on the same persistent storage. Preserving them permits
+  recovery across process/host restart; deleting/replacing them or recreating the environment is
+  fuera de la garantía.
 
 ## Validation invariants
 
-Antes de construir o persistir `Order`, se acumulan todos los errores semánticos detectables:
+For a correctly deserialized DTO, one deterministic pass accumulates:
 
-1. `customerId` no es nulo, vacío ni sólo whitespace.
-2. `items` existe y contiene al menos un elemento.
-3. Cada elemento existe.
-4. Cada `productId` no es nulo, vacío ni sólo whitespace.
-5. Cada `quantity` es un entero `Int64` mayor que cero.
-6. Cada `productId` utilizable aparece una sola vez con igualdad ordinal exacta.
+1. missing/null/whitespace `customerId`;
+2. missing/null/empty `items`;
+3. each null element as `items[n]`;
+4. missing/null/whitespace product as `items[n].productId`;
+5. missing/null/non-positive quantity as `items[n].quantity`;
+6. each repeated usable product after its first ordinal-equal occurrence.
 
-Los identificadores válidos se almacenan tal como llegaron. Las diferencias de case, whitespace
-interno/externo o representación Unicode no se normalizan.
+Duplicate errors use the later `items[n].productId` key and reference only the first index; they
+never echo the submitted ID. Invalid/null IDs are not entered in the duplicate set. Case,
+whitespace and non-normalized Unicode differences remain distinct.
 
 ## Atomic creation invariant
 
-Una creación confirmada cumple simultáneamente:
+A confirmed order always has:
 
-- exactamente una fila en `orders`;
-- una fila en `order_items` por cada elemento solicitado;
-- ninguna fila adicional o faltante;
-- todas las filas pertenecen a la misma transacción ya confirmada.
+- exactly one `orders` row;
+- exactly one `order_items` row per accepted input item;
+- no missing/additional item;
+- status `Pending`;
+- all rows committed by the same transaction.
 
-Si cualquier insert, constraint o commit falla, la transacción completa revierte y la orden no está
-disponible para consulta.
+Validation precedes any transaction. An insert/constraint failure rolls back the whole attempt.
+`201` is possible only after commit. A read can observe either the pre-commit snapshot (possibly
+`404`) or the complete committed aggregate, never a partial aggregate.
 
-## Uniqueness under concurrency
+## Failure and outcome states
 
-- La primary key de `orders` impide aceptar un `orderId` repetido, aun ante concurrencia.
-- Una colisión del generador reintenta con un GUID nuevo; nunca se devuelve un ID no confirmado.
-- La primary key compuesta de `order_items` refuerza la prohibición de productos repetidos.
-- Cada solicitud válida es independiente; no existe clave de idempotencia ni unicidad por contenido.
+There is no persisted “Creating” state. Observable storage has only:
+
+- **Absent**: before commit, after rollback, gate timeout, proven pre-commit `503`, or three UUID
+  collisions.
+- **Confirmed**: commit returned successfully; complete order is queryable afterward.
+- **Client-uncertain**: commit may have completed but response failed/was lost. Storage is still
+  either Absent or Confirmed; uncertainty belongs to the client observation, not a database state.
+
+No idempotency key or content uniqueness exists. Retrying a client-uncertain request can create a
+second confirmed order.
+
+## Concurrency invariants
+
+- The in-process writer gate serializes writers and imposes a 1-second wait only.
+- SQLite enforces transaction atomicity, binary uniqueness and reader snapshots.
+- Readers never acquire the gate.
+- A reader snapshot before commit may return `404`; this does not block a later commit.
+- A reader after commit can retrieve the complete order.
+- SQLite constraints remain effective if another process accesses the file, but multi-process or
+  horizontal operation is unsupported.

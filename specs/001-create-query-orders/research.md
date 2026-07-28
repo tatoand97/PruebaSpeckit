@@ -2,304 +2,444 @@
 
 **Feature**: `001-create-query-orders`
 
+**Active Git branch**: `main`
+
 **Date**: 2026-07-28
 
-**Status**: Complete — no pending clarifications
+**Status**: Complete after post-design checklist review
 
-Las decisiones se evaluaron desde requisitos y riesgos concretos. Las versiones se comprobaron en
-documentación oficial y en el registro de paquetes el 2026-07-28.
+Las decisiones se agrupan por impacto material en contrato, implementación, pruebas, seguridad,
+concurrencia, rendimiento y operación. Los checks no se convierten en requisitos independientes.
 
-## 1. Platform and servicing level
+## 1. Platform and minimal solution
 
-**Decision**: usar .NET 10 LTS con SDK `10.0.302`, C# 14 y paquetes Microsoft de la línea estable
-`10.0.10`. Fijar el SDK mediante `global.json`, aceptar roll-forward sólo dentro del patch
-planificado y usar lock files de NuGet.
+**Decision**: .NET 10 LTS con SDK `10.0.302`, C# 14 y paquetes Microsoft de servicing `10.0.10`.
+Una solución `.slnx`, un proyecto `Orders.Api` y un proyecto `Orders.Api.Tests`.
 
-**Rationale**: .NET 10 es el baseline obligatorio y permanece soportado hasta noviembre de 2028.
-El servicing `10.0.10`, publicado el 2026-07-14, es el vigente y contiene correcciones de seguridad;
-los SDK `10.0.302` y `10.0.110` lo incluyen. El SDK local `10.0.203`/runtime `10.0.7` sirve para
-inspección de este plan, pero no es el nivel elegido para implementar o verificar.
+**Rationale**: .NET 10 es constitucional. ASP.NET Core, `System.Text.Json`, Problem Details, DI y
+logging están en el shared framework. Sólo SQLite necesita paquete runtime. La feature no justifica
+proyectos por capa.
 
 **Alternatives considered**:
 
-- Mantener `10.0.203`/`10.0.7`: rechazado porque ya no es el servicing vigente.
-- .NET 8 o 9: rechazado; contradice el baseline sin aportar una ventaja.
-- .NET 11 preview: rechazado; no es estable y está fuera del baseline.
+- Clean Architecture, CQRS, MediatR, Repository, Unit of Work: rechazados por falta de necesidad.
+- Frameworks externos de JSON, validación o logging: rechazados; las capacidades nativas bastan.
+- Varios servicios o proyectos de dominio/infraestructura: rechazados; amplían despliegue y
+  transacciones sin aportar comportamiento.
 
 Sources: [.NET releases and support](https://learn.microsoft.com/en-us/dotnet/core/releases-and-support),
-[.NET 10 downloads](https://dotnet.microsoft.com/en-us/download/dotnet/10.0).
+[ASP.NET Core API overview](https://learn.microsoft.com/en-us/aspnet/core/fundamentals/apis?view=aspnetcore-10.0).
 
-## 2. Application type and exposure
+## 2. Two capabilities and three HTTP operations
 
-**Decision**: servicio web ASP.NET Core Minimal API con JSON sobre HTTP. Exponer:
+**Decision**: exponer exactamente:
 
-- `POST /orders` para crear;
-- `GET /orders/{orderId}` para consultar;
-- `GET /orders` únicamente para representar como `400` la consulta sin identificador.
+- `POST /orders`: capacidad de crear;
+- `GET /orders/{orderId}`: capacidad de consultar por identificador;
+- `GET /orders`: operación técnica que responde `400` por identificador ausente y nunca enumera.
 
-**Rationale**: el requisito describe solicitantes simultáneos y un contrato de creación/consulta.
-HTTP permite una interfaz externa automatizable y accesible sin UI. ASP.NET Core recomienda Minimal
-APIs para APIs nuevas y las ofrece en el shared framework, con serialización JSON, routing, DI,
-logging y resultados tipados sin dependencias adicionales. Dos endpoints no justifican Controllers.
+**Rationale**: reconcilia el contrato aprobado sin inventar una tercera capacidad. HTTP JSON permite
+pruebas automatizadas y 25 clientes concurrentes; Minimal APIs es la opción más pequeña.
 
 **Alternatives considered**:
 
-- CLI: rechazada; no representa naturalmente 25 usuarios simultáneos ni una interfaz remota.
-- UI web: rechazada; no hay requisitos visuales y agregaría frontend.
-- Controllers: rechazados; aportan convenciones y estructura que dos operaciones no requieren.
-- gRPC: rechazado; exige contrato/tooling adicional sin streaming ni comunicación servicio-servicio.
+- Omitir `GET /orders`: rechazado; volvería dependiente del router la distinción normativa de
+  identificador ausente.
+- Hacer de `GET /orders` un listado: rechazado; añade negocio fuera de alcance y expone datos.
+- Controllers/gRPC/UI/CLI: rechazados por complejidad o falta de adecuación al contrato aprobado.
 
-Sources: [ASP.NET Core APIs overview](https://learn.microsoft.com/en-us/aspnet/core/fundamentals/apis?view=aspnetcore-10.0),
-[Minimal API responses](https://learn.microsoft.com/en-us/aspnet/core/fundamentals/minimal-apis/responses?view=aspnetcore-10.0).
+Source: [Minimal API parameter binding](https://learn.microsoft.com/en-us/aspnet/core/fundamentals/minimal-apis/parameter-binding?view=aspnetcore-10.0).
 
-## 3. Minimal solution and project structure
+## 3. JSON binding policy
 
-**Decision**: una solución `Orders.slnx`, un proyecto desplegable `src/Orders.Api` y un proyecto
-`tests/Orders.Api.Tests`. Mantener clases concretas dentro del proyecto web; no crear proyectos
-Domain/Application/Infrastructure ni una librería de contratos.
+**Decision**: usar `HttpRequest.ReadFromJsonAsync<T>`/`System.Text.Json` dentro del endpoint, sin
+parser ni converter propio. El DTO usa referencias y cantidades anulables para que ausencia/null
+puedan acumularse como errores semánticos. Opciones:
 
-**Rationale**: una sola feature, dos entidades y dos operaciones caben en una unidad desplegable.
-Separar las pruebas mantiene sus dependencias fuera de producción; dividirlas nuevamente en
-unit/integration añadiría administración sin aislamiento útil para esta PoC. `.slnx` es el formato
-predeterminado de solución en .NET 10.
+- property naming camelCase y matching case-sensitive;
+- numeric handling estricto;
+- `AllowDuplicateProperties=false`;
+- propiedades desconocidas ignoradas (`UnmappedMemberHandling=Skip`);
+- sin comentarios, trailing commas ni números entre comillas.
 
-**Alternatives considered**:
+La política observable es:
 
-- Todo en un proyecto: rechazado porque mezclaría dependencias y artefactos de prueba con runtime.
-- Clean Architecture de cuatro proyectos: rechazada; no existe independencia de despliegue,
-  dominio complejo ni adaptadores múltiples que la justifiquen.
-- Varios servicios: rechazados; romperían atomicidad y operación simple sin un requisito.
-- `.sln` heredado: válido, pero rechazado porque `.slnx` es el default mantenible de .NET 10.
+| Case | Result |
+|---|---|
+| Body ausente, vacío o top-level `null` con Content-Type correcto | `400 invalid-body` |
+| JSON truncado/malformado | `400 invalid-body` |
+| Propiedad obligatoria ausente o nula | deserializa a null y participa en `400 validation` |
+| `items` nulo/vacío o elemento nulo | `400 validation`; se siguen validando valores disponibles |
+| Tipo incorrecto | `400 invalid-body`; no se promete validación semántica posterior |
+| Cantidad fuera de `Int64`, fracción o notación exponencial | `400 invalid-body` |
+| Propiedad desconocida | ignorada, nunca almacenada ni devuelta |
+| Nombre de propiedad JSON repetido | `400 invalid-body` mediante opción nativa de .NET 10 |
+| Content-Type ausente o distinto de `application/json` | `415` antes de leer el body; prevalece si también falta body |
 
-Source: [.NET default templates](https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-new-sdk-templates).
-
-## 4. Persistence
-
-**Decision**: SQLite embebido mediante `Microsoft.Data.Sqlite` `10.0.10`, SQL parametrizado directo y
-un archivo configurable en disco local. Crear dos tablas estrictas al iniciar si no existen, activar
-foreign keys y WAL. No incorporar migrador en esta primera PoC; cualquier cambio futuro de esquema
-deberá introducir una migración explícita.
-
-**Rationale**: FR-014 requiere disponibilidad durante la vida del entorno, y FR-007/FR-020 requieren
-atomicidad y unicidad concurrente. SQLite aporta durabilidad, transacciones, primary/foreign keys y
-restricciones sin operar un servidor. La BCL no incluye un proveedor SQLite; ésta es la única
-dependencia runtime justificada. Con dos tablas y dos consultas, un ORM añade más superficie que SQL
-directo.
+**Rationale**: distingue parsing de semántica y permite cumplir la acumulación sin reimplementar
+JSON. Ignorar miembros desconocidos es el default más simple y compatible; cerrar los esquemas de
+respuesta evita que esa tolerancia expanda los datos expuestos. Rechazar duplicados elimina
+last-write-wins ambiguo usando una opción nativa.
 
 **Alternatives considered**:
 
-- Memoria (`ConcurrentDictionary`): rechazada; pierde órdenes al reiniciar el proceso.
-- JSON/archivo por orden: rechazado; exigiría implementar recuperación de escrituras parciales,
-  locking, índices y unicidad que SQLite ya resuelve.
-- SQL Server/PostgreSQL: rechazados; añaden servicio, credenciales y operación externa sin escala que
-  lo requiera.
-- Entity Framework Core: rechazado; tracking, migraciones y LINQ no compensan para dos tablas y SQL
-  fijo.
-- Repository/Unit of Work: rechazados; `SqliteOrderStore` y una transacción concreta ya expresan el
-  límite requerido.
+- Parser `Utf8JsonReader` propio: rechazado; replica funcionalidad estándar.
+- Rechazar propiedades desconocidas: válido, pero descartado porque no protege un requisito y
+  endurece innecesariamente la PoC.
+- Aceptar duplicados con “último gana”: rechazado por ambigüedad contractual.
+- C# `required` para todo: rechazado porque convertiría ausencias en parsing failure e impediría
+  acumular otras reglas semánticas.
 
-Sources: [Microsoft.Data.Sqlite package](https://www.nuget.org/packages/Microsoft.Data.Sqlite/10.0.10),
-[SQLite transactions](https://learn.microsoft.com/en-us/dotnet/standard/data/sqlite/transactions).
+Sources:
+[required properties](https://learn.microsoft.com/en-us/dotnet/standard/serialization/system-text-json/required-properties),
+[nullable annotations](https://learn.microsoft.com/en-us/dotnet/standard/serialization/system-text-json/nullable-annotations),
+[unmapped members](https://learn.microsoft.com/en-us/dotnet/standard/serialization/system-text-json/missing-members),
+[`AllowDuplicateProperties`](https://learn.microsoft.com/en-us/dotnet/api/system.text.json.jsonserializeroptions.allowduplicateproperties?view=net-10.0),
+[`Utf8JsonReader.GetInt64`](https://learn.microsoft.com/en-us/dotnet/api/system.text.json.utf8jsonreader.getint64?view=net-10.0).
 
-## 5. Identifier generation and uniqueness
+## 4. SQLite persistence and durability boundary
 
-**Decision**: generar `Guid.NewGuid()` (UUID v4), exponerlo en formato canónico `D` y persistirlo como
-`TEXT PRIMARY KEY COLLATE BINARY`. La creación se considera exitosa sólo después del insert y commit.
-Si la primary key detecta una colisión, revertir, generar otro GUID y repetir.
+**Decision**: `Microsoft.Data.Sqlite` `10.0.10`, SQL parametrizado y un archivo configurable sobre
+almacenamiento local persistente. El archivo principal y los sidecars WAL activos se preservan como
+una unidad. Configuración:
 
-**Rationale**: `Guid.NewGuid()` es nativo, no incorpora cliente, productos ni contenido y usa 122 bits
-de entropía fuerte. La aleatoriedad hace la colisión extremadamente improbable; la primary key da la
-garantía determinista de que nunca se acepten dos órdenes con el mismo identificador. El valor se
-trata como texto opaco en consulta: no se usa `Guid.TryParse` para convertir un identificador no vacío
-en validación inválida.
+- esquema v1 creado transaccionalmente y validado al iniciar;
+- `PRAGMA user_version=1`, tablas/columnas requeridas, `quick_check` correcto y
+  `foreign_key_check` vacío;
+- `STRICT`, `foreign_keys=ON`, `journal_mode=WAL`, `synchronous=FULL`;
+- sin `Cache=Shared`;
+- `PRAGMA busy_timeout=500` en cada conexión;
+- writer transaction `BEGIN IMMEDIATE`.
+
+Una orden confirmada sobrevive reinicios del proceso y host si se conserva ese almacenamiento.
+Recrear el entorno, eliminar/reemplazar el archivo o perder el volumen queda fuera de garantía.
+
+**Rationale**: SQLite aporta recuperación WAL, atomicidad y constraints sin servidor/credenciales.
+`FULL` prioriza la garantía de durabilidad de esta PoC sobre micro-optimizaciones. Versionar y
+validar el esquema evita operar silenciosamente con estructura incompatible.
 
 **Alternatives considered**:
 
-- Entero autoincremental: rechazado; es predecible y facilita enumeración en una API sin auth.
-- UUID v7: rechazado; el orden temporal no es requisito y revelaría orden/tiempo aproximado.
-- ID derivado del cliente/contenido: rechazado por SR-003 y porque solicitudes idénticas deben crear
-  órdenes distintas.
-- Generador externo: rechazado; no hay despliegue distribuido que lo necesite.
+- Memoria: rechazada; no sobrevive reinicio de proceso.
+- JSON/archivo por orden: rechazado; obligaría a construir journaling, locks e índices.
+- SQL Server/PostgreSQL: rechazados; añaden servicio y secretos sin requisito.
+- Migrator/ORM: diferidos; el esquema v1 fijo puede crearse directamente. Un cambio futuro sí
+  requerirá migración explícita.
+
+Sources:
+[Microsoft.Data.Sqlite connection strings](https://learn.microsoft.com/en-us/dotnet/standard/data/sqlite/connection-strings),
+[SQLite transactions](https://learn.microsoft.com/en-us/dotnet/standard/data/sqlite/transactions),
+[SQLite async limitations](https://learn.microsoft.com/en-us/dotnet/standard/data/sqlite/async).
+
+## 5. UUID v4 identity and bounded collision handling
+
+**Decision**: generar `Guid.NewGuid()`, serializar `ToString("D")` y persistir
+`TEXT PRIMARY KEY COLLATE BINARY`. La primary key es la garantía definitiva. Una colisión hace
+rollback del intento, genera un UUID nuevo y vuelve a intentar, con tres intentos totales. Tras la
+tercera colisión: rollback, cero orden confirmada, `500 internal`, log sólo
+`failureCategory=uuid_collision`.
+
+**Rationale**: UUID v4 no revela contenido y satisface unicidad sin coordinador. El límite evita un
+loop indefinido aunque la colisión sea extremadamente improbable.
+
+**Alternatives considered**:
+
+- Retry ilimitado: rechazado; viola presupuestos y oculta un generador defectuoso.
+- UUID v7/autoincremental: rechazados; aportan orden/predecibilidad no requerida.
+- Idempotency key o ID derivado del contenido: rechazados; contradicen creaciones independientes.
 
 Source: [`Guid.NewGuid`](https://learn.microsoft.com/en-us/dotnet/api/system.guid.newguid?view=net-10.0).
 
-## 6. Atomicity
+## 6. Atomicity and uncertain outcomes
 
-**Decision**: validar la solicitud completa antes de abrir la transacción; después insertar la fila
-de `orders` y todas las filas `order_items` dentro de una única transacción SQLite serializable.
-Responder `201` sólo después de `Commit`. Ante cualquier excepción, rollback y respuesta sin
-confirmación de creación.
+**Decision**: mantener exactamente:
 
-**Rationale**: una transacción agrupa todas las sentencias como una unidad atómica y conserva el
-estado inicial si alguna falla. Esto satisface FR-007–FR-009 y el edge case de fallo antes de
-confirmación sin compensaciones ni patrones adicionales.
+```text
+validación completa
+→ writer gate
+→ conexión + BEGIN IMMEDIATE
+→ insert orders
+→ insert all order_items
+→ commit
+→ intento de respuesta HTTP 201
+```
 
-**Alternatives considered**:
+No se usa el cancellation token del cliente para interrumpir una transacción después de iniciada;
+la operación termina en commit o rollback para conservar una frontera determinista. Cualquier
+fallo pre-commit revierte. `201` sólo se intenta después del retorno exitoso de commit.
 
-- Inserts independientes y compensación: rechazados; pueden dejar estado parcial y son más complejos.
-- Transacción distribuida/outbox: rechazados; existe un único recurso local.
-- Guardar toda la orden como JSON en una columna: rechazado; dificulta restricciones de unicidad y
-  cantidad por elemento sin aportar una necesidad.
+`503` se usa únicamente cuando se sabe que no hubo commit. Si commit arroja y no puede demostrarse
+su resultado, se clasifica `500`/desconexión, nunca `503`. Si commit terminó y la respuesta se pierde,
+la orden puede existir aunque el cliente no conozca el resultado. Un retry puede crear otra orden.
 
-Source: [Microsoft.Data.Sqlite transactions](https://learn.microsoft.com/en-us/dotnet/standard/data/sqlite/transactions).
-
-## 7. Concurrency
-
-**Decision**: una conexión nueva por operación; WAL; transacciones de escritura cortas y un
-`SemaphoreSlim(1,1)` en la única instancia para serializar creaciones. Las consultas no usan el gate.
-Usar APIs ADO.NET síncronas dentro de la sección crítica, timeout inferior a 2 segundos y devolver
-`503` ante saturación/bloqueo operativo sin crear datos parciales.
-
-**Rationale**: los objetos `SqliteConnection`, `SqliteCommand` y `SqliteDataReader` no son thread-safe
-y no deben compartirse. SQLite admite concurrencia, pero sólo un escritor pendiente; WAL mejora la
-convivencia con lecturas. El gate nativo evita una carrera de writers dentro del único proceso y
-mantiene el modelo fácil de probar. SQLite no ofrece I/O async real, por lo que simularlo con métodos
-ADO async sólo bloquearía igualmente.
+**Rationale**: la transacción evita estados parciales; no hay compensación ni recurso distribuido.
+La ausencia deliberada de idempotencia hace necesario documentar, no ocultar, el resultado incierto.
 
 **Alternatives considered**:
 
-- Compartir una conexión singleton: rechazado por thread-safety.
-- Confiar sólo en retries de SQLite: válido, pero rechazado como estrategia primaria porque produce
-  contención menos predecible bajo la carga objetivo.
-- Cola/background worker: rechazado; cambiaría la creación de síncrona a asíncrona.
-- Base de datos cliente-servidor: rechazada; 25 usuarios y transacciones pequeñas no la justifican.
-- Escalado horizontal: fuera de alcance; el diseño objetivo es una instancia.
+- Devolver `201` antes del commit: rechazado; confirmaría datos no durables.
+- Convertir todo fallo de persistencia a `503`: rechazado; podría afirmar falsamente “no commit”.
+- Outbox/idempotency key: rechazados; no hay downstream y el usuario prohibió resolver el retry de
+  esa manera.
 
-Sources: [Database errors, locking and retries](https://learn.microsoft.com/en-us/dotnet/standard/data/sqlite/database-errors),
+## 7. Concurrency model and operational budget
+
+**Decision**:
+
+- una sola instancia soportada;
+- una conexión SQLite por operación;
+- `SemaphoreSlim(1,1)` sólo para writers;
+- espera máxima del gate: 1.000 ms;
+- readers sin gate;
+- `busy_timeout`: 500 ms;
+- no retry loop general de SQLite;
+- no timeout artificial dentro de la transacción síncrona.
+
+Presupuesto de objetivo: 1.000 ms gate + 500 ms busy + 500 ms de margen para binding, validación,
+SQL local, commit y respuesta. El objetivo `<2 s` se verifica end-to-end; no se declara un hard
+timeout de servidor que no pueda cancelar commit con seguridad.
+
+`SemaphoreSlim` no garantiza FIFO. No se fija una segunda capacidad de cola: las 25 solicitudes
+esperan de forma asíncrona y las que excedan 1 segundo reciben `503`. El riesgo de starvation se
+acepta sólo en el entorno/control/carga declarados.
+
+**Guarantees by component**:
+
+- Gate: evita writers simultáneos dentro del proceso y da el timeout local.
+- SQLite: ACID, primary/foreign keys, locks interproceso, snapshot de lectura y ausencia de
+  parciales.
+- WAL: permite readers con writer; no sustituye atomicidad/constraints.
+
+Una lectura iniciada antes del commit puede ver el snapshot anterior y responder `404`; nunca ve
+una orden parcial. Una consulta iniciada después del commit puede ver la orden completa. El `404`
+pre-commit no impide un commit posterior.
+
+**Alternatives considered**:
+
+- Gate también para readers: rechazado; reduce concurrencia sin mejorar consistencia.
+- Retry/backoff general: rechazado; podría exceder silenciosamente 2 segundos.
+- Background queue: rechazado; cambiaría la API síncrona.
+- Horizontal scale: rechazado; fuera de alcance y el gate sería sólo local.
+
+Sources:
+[SQLite locking and retries](https://learn.microsoft.com/en-us/dotnet/standard/data/sqlite/database-errors),
 [SQLite async limitations](https://learn.microsoft.com/en-us/dotnet/standard/data/sqlite/async).
 
-## 8. Validation
+## 8. Semantic validation and duplicate reporting
 
-**Decision**: validador C# manual y sin estado que acumula todos los errores detectables. Validar con
-`string.IsNullOrWhiteSpace`, `items` no nulo/no vacío, cada item, `Int64 > 0` y duplicados mediante
-comparación ordinal exacta. Almacenar los identificadores sin trim, case folding ni normalización.
-Los fallos de sintaxis/tipo JSON se reportan como error de `body`; sólo después de un parse exitoso
-se enumeran todas las reglas semánticas.
+**Decision**: validación manual, determinista y acumulativa después de deserialización:
 
-**Rationale**: son pocas reglas, varias cruzan la colección y una debe identificar duplicados. Código
-directo es menor y más transparente que un framework. `Int64` mantiene cantidades enteras amplias;
-un número fuera de rango se rechaza explícitamente y nunca se trunca o redondea, como permite FR-021.
+1. `customerId` utilizable;
+2. `items` presente/no vacío;
+3. cada elemento no nulo;
+4. cada `productId` utilizable;
+5. cada `quantity` presente y positiva;
+6. duplicados entre product IDs utilizables con `StringComparer.Ordinal`.
 
-**Alternatives considered**:
+Para cada repetición posterior a la primera, usar la clave `items[n].productId` y un mensaje que
+referencia el índice previo, no el ID controlado por el solicitante. Case, whitespace y secuencias
+Unicode distintas no son duplicados. Tres repeticiones y varios grupos producen un error por cada
+ocurrencia posterior. Items/IDs nulos o inválidos conservan sus errores y no participan en el set.
 
-- DataAnnotations/validación automática: rechazada; no cubre bien duplicados, acumulación y rutas de
-  error sin validadores propios.
-- `Microsoft.Extensions.Validation`: rechazado; añadir paquete para reglas que caben en una función.
-- FluentValidation: rechazado; dependencia externa sin complejidad que la justifique.
-- Normalizar identificadores: rechazado; alteraría valores opacos y comportamiento de duplicados.
-
-## 9. External contract and errors
-
-**Decision**: contrato OpenAPI 3.1 estático en `contracts/openapi.yaml`. Éxito de creación `201` con
-`Location`, `orderId` y `Pending`; consulta `200`; validación `400`; no encontrado `404`; límite de
-transporte `413`; indisponibilidad temporal `503`. Todos los errores usan
-`application/problem+json`; validación añade `errors` y todos añaden `traceId`.
-
-**Rationale**: Problem Details es capacidad nativa de ASP.NET Core y produce un formato consistente
-sin middleware de terceros. Un contrato estático basta para dos endpoints y sirve directamente como
-fuente para pruebas; no hace falta generación OpenAPI en runtime. El detalle no expone excepciones,
-SQL, rutas físicas ni datos ajenos.
+**Rationale**: informa exactamente qué posiciones conflictúan sin eco de entrada ni amplificación.
+Un único recorrido acumula reglas sin framework de validación.
 
 **Alternatives considered**:
 
-- Objeto de error propio: rechazado; duplicaría un estándar y soporte nativo.
-- Excepciones/stack traces en respuesta: rechazados por SR-005.
-- `200` para errores: rechazado; degrada semántica HTTP y pruebas.
-- `Microsoft.AspNetCore.OpenApi` runtime: rechazado; el contrato versionado estático satisface la
-  necesidad sin dependencia de producción adicional.
+- Consolidar cantidades: rechazado; cambia negocio.
+- Normalizar/trim/case-fold: rechazado; altera identificadores opacos.
+- Incluir productId en el mensaje: rechazado; eco innecesario de input no confiable.
 
-Sources: [ASP.NET Core API error handling](https://learn.microsoft.com/en-us/aspnet/core/fundamentals/error-handling-api?view=aspnetcore-10.0),
-[ASP.NET Core error handling](https://learn.microsoft.com/en-us/aspnet/core/fundamentals/error-handling?view=aspnetcore-10.0).
+## 9. 1 MiB transport protection
 
-## 10. Testing strategy
+**Decision**: configurar `KestrelServerOptions.Limits.MaxRequestBodySize=1_048_576`. No se instala
+request-decompression middleware. El límite cuenta bytes del body entregado por Kestrel después de
+framing, tanto con `Content-Length` como chunked; un `Content-Length` superior puede rechazarse antes
+de ejecutar el endpoint y un stream sin longitud se rechaza al superar el límite. Nunca se trunca.
 
-**Decision**: `MSTest` `4.3.2` y `Microsoft.AspNetCore.Mvc.Testing` `10.0.10` en un proyecto de
-pruebas. Cobertura:
+`413` garantiza cero orden porque el body no alcanza una creación válida. Un `Content-Length`
+superior permite rechazo temprano; si falta se cuentan bytes reales, y si es engañoso/inconsistente
+la solicitud es un error de protocolo del host y no puede eludir el límite. Como el rechazo puede
+producirse antes del pipeline de la app, no se garantiza body, media type ni Problem Details.
 
-- unit: todas las combinaciones de validación y acumulación de errores;
-- integration: esquema SQLite, create/read y rollback real con archivo temporal por test;
-- contract: status, headers, media types y cuerpos del OpenAPI;
-- concurrency: 25 creaciones paralelas, IDs distintos y 25 órdenes completas consultables;
-- atomicity: fallo de item dentro de la transacción deja cero filas;
-- load/acceptance: mezcla de creación/consulta, 25 usuarios, p95 < 2 s y resultados correctos;
-- usability acceptance: participantes representativos siguen únicamente el quickstart; se mide desde
-  que reciben la guía hasta que crean y consultan una orden, y al menos 95 % termina sin ayuda en
-  menos de 2 minutos (SC-005);
-- security/observability: no se filtran detalles internos y los logs capturados omiten identificadores
-  y cuerpos.
-
-**Rationale**: MSTest es mantenido, integra runner y analyzers; `WebApplicationFactory` prueba el
-pipeline real en proceso. SQLite temporal prueba la tecnología elegida en lugar de un fake. La carga
-es pequeña y puede producirse con `Task` + `HttpClient`, sin instalar herramienta de performance.
-SC-005 mide comprensión humana y por ello requiere una sesión de aceptación registrada, no una
-simulación automatizada; todos los demás comportamientos se automatizan.
+**Rationale**: es la protección más simple y nativa frente a bodies desproporcionados; no introduce
+un máximo de productos ni cantidad.
 
 **Alternatives considered**:
 
-- Sólo unit tests: rechazado; no demostrarían transacciones, routing ni contrato.
-- Mocks de base de datos: rechazados; ocultarían la semántica de SQLite.
-- xUnit/NUnit: válidos, pero no aportan capacidad necesaria frente a MSTest.
-- Playwright: rechazado; no existe UI.
-- Herramienta externa de load test: rechazada; 25 usuarios caben en un harness de prueba nativo.
+- Límite de items o cantidad: rechazado; sería máximo de negocio.
+- Leer/truncar manualmente: rechazado; violaría rechazo total y reimplementaría límites.
+- Middleware de error para todos los `413`: rechazado; no puede cubrir todos los rechazos del host
+  y añade complejidad sin valor para la PoC.
 
-Sources: [MSTest SDK guidance](https://learn.microsoft.com/en-us/dotnet/core/testing/unit-testing-mstest-sdk),
-[ASP.NET Core integration tests](https://learn.microsoft.com/en-us/aspnet/core/test/integration-tests?view=aspnetcore-10.0),
-[`Microsoft.AspNetCore.Mvc.Testing` 10.0.10](https://www.nuget.org/packages/Microsoft.AspNetCore.Mvc.Testing/10.0.10),
-[`MSTest` 4.3.2](https://www.nuget.org/packages/MSTest/4.3.2).
+Sources:
+[Kestrel security and limits](https://learn.microsoft.com/en-us/aspnet/core/fundamentals/servers/kestrel/security-considerations?view=aspnetcore-10.0),
+[Kestrel options](https://learn.microsoft.com/en-us/aspnet/core/fundamentals/servers/kestrel/options?view=aspnetcore-10.0).
 
-## 11. Logging and observability
+## 10. HTTP errors and Problem Details boundary
 
-**Decision**: `ILogger` con console formatter JSON nativo y un middleware mínimo de finalización.
-Registrar nombre estable de operación, status, duración, resultado y `traceId`; registrar excepciones
-operativas con código/categoría, nunca cuerpos, ruta cruda, orderId, customerId ni productId. Sin
-exportador de métricas o tracing. El load test calcula conteo, errores y p95.
+**Decision**: todos los errores creados por handlers/application services usan
+`application/problem+json`, catálogo estable y schemas cerrados. La matriz normativa:
 
-**Rationale**: logs estructurados permiten diagnosticar fallos y latencia con capacidades incluidas
-en ASP.NET Core. El orderId concede consulta en esta PoC, por lo que omitirlo de logs reduce exposición.
-No hay backend de observabilidad ni servicios downstream que justifiquen OpenTelemetry/exporters.
+| Operation | 2xx | 400 | 404 | 413 | 415 | 500 | 503 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| `POST /orders` | 201 | app PD | N/A | host; PD not guaranteed | app PD | app PD | app PD; no commit |
+| `GET /orders` | — | app PD | N/A | N/A | N/A | app PD | N/A |
+| `GET /orders/{orderId}` | 200 | app PD | app PD | N/A | N/A | app PD | app PD |
 
-**Alternatives considered**:
+`405`, malformed HTTP, server timeouts, route rejections and disconnects outside controlled handlers
+are explicitly outside the Problem Details contract. No middleware se añade sólo para unificarlos.
+No `Retry-After`: no existe intervalo conocido.
 
-- Serilog/NLog: rechazados; el proveedor JSON nativo cubre el requisito.
-- Logging de request/response bodies: rechazado por SR-007.
-- Stack de métricas/tracing: rechazado en esta PoC; se reconsiderará al definir un backend operativo
-  o múltiples servicios.
+Problem types/titles/details/instances/keys are normative in `plan.md` and OpenAPI. `instance` uses
+route template, not raw input. Handlers producen los errores conocidos; un exception handler
+estándar mínimo produce sólo el `500` seguro de excepciones no controladas. No se habilita status
+code pages, por lo que `405`/routing no se homogeneizan. `500` nunca incluye exception, SQL, path o
+stack trace.
 
-Source: [Console log formatting](https://learn.microsoft.com/en-us/dotnet/core/extensions/logging/console-log-formatter).
-
-## 12. Capacity target
-
-**Decision**: diseñar para 25 usuarios con operaciones pequeñas, validar con una barrera que inicia
-25 flujos simultáneos y medir cada resultado desde cliente. El test falla si existen IDs repetidos,
-errores inesperados, datos incompletos o p95 >= 2 segundos.
-
-**Rationale**: la carga es baja para Kestrel y SQLite WAL si las escrituras son breves. La evidencia
-medida es preferible a añadir cache, pooling manual o infraestructura anticipada. El gate de escritura
-se evaluará bajo el caso peor de 25 creaciones simultáneas.
+**Rationale**: el contrato sólo promete lo que la aplicación controla. ASP.NET Core Problem Details
+evita un envelope propio.
 
 **Alternatives considered**:
 
-- Cache de órdenes: rechazada; añade consistencia sin demostrar necesidad.
-- Optimización prematura/benchmark de microcomponentes: rechazada; el criterio es end-to-end.
-- Escalado horizontal: rechazado; amplía operación y cambia persistencia sin requisito.
+- “Todos los errores HTTP son Problem Details”: rechazado; Kestrel/red pueden responder antes.
+- Middleware complejo para 405/timeouts: rechazado; no mejora el negocio.
+- Error model custom: rechazado; duplica el estándar.
 
-## 13. Build, tests and execution automation
+Sources:
+[ASP.NET Core API error handling](https://learn.microsoft.com/en-us/aspnet/core/fundamentals/error-handling-api?view=aspnetcore-10.0),
+[Minimal API responses](https://learn.microsoft.com/en-us/aspnet/core/fundamentals/minimal-apis/responses?view=aspnetcore-10.0).
 
-**Decision**: proponer `global.json`, `Directory.Build.props`, `Directory.Packages.props`, lock files
-y `scripts/verify.ps1`. El script ejecutará restore bloqueado, build Release con warnings como errores,
-pruebas completas y categorías de concurrencia/carga; cada comando propagará código de fallo. La
-ejecución usa `dotnet run` y configuración por variables de entorno.
+## 11. 503 and permanent failures
 
-**Rationale**: comandos SDK y PowerShell cumplen reproducibilidad sin instalar herramientas.
-Centralizar versions evita drift entre runtime y tests. El script no oculta pasos manuales.
+**Decision**: `503` sólo para gate timeout, SQLite busy/locked agotando 500 ms, o storage temporal
+pre-commit con garantía de no commit. Permisos, configuración, corrupción, schema incompatible,
+filesystem lleno, constraints inesperadas e invariantes internas son `500` genérico o fallo de
+startup. Un fallo ambiguo de commit no es `503`.
+
+**Rationale**: separa indisponibilidad temporal/reintentable de defectos permanentes y mantiene la
+garantía fuerte de no confirmación en cada `503`.
 
 **Alternatives considered**:
 
-- Make/Bash: rechazados; PowerShell es la preferencia constitucional del repositorio.
-- Docker como requisito de build: rechazado; SQLite embebido y .NET SDK bastan.
-- CI de proveedor concreto: diferido; no se ha solicitado plataforma remota.
+- Retry general o `Retry-After`: rechazados; no hay intervalo fiable.
+- Tratar “disk full” como temporal: rechazado; requiere intervención y no es un retry corto seguro.
+
+## 12. Controlled environment, data classification and rate limiting
+
+**Decision**: soportar sólo loopback o red de desarrollo aislada, sin Internet pública, con datos
+sintéticos o preclasificados no sensibles y sin credenciales reales. HTTP sin TLS se permite sólo
+en loopback; otra topología controlada decide TLS en su boundary. El operador es responsable de
+binding/firewall. Salir de ese límite requiere auth, authz, revisión de red/TLS y threat review.
+
+No implementar rate limiting: entorno aislado, 25 usuarios de aceptación y no exposición pública.
+Reevaluar antes de exposición no controlada o incremento material de carga.
+
+SC-007 se evidencia con fixtures de nombres sintéticos, revisión del archivo SQLite/evidencia y un
+registro previo de clasificación para cualquier dato no generado. Dato real no clasificado bloquea
+la ejecución.
+
+**Rationale**: auth y rate limiting no aportan al ejercicio si el boundary se cumple; documentar al
+responsable evita presentar la API anónima como segura fuera de él.
+
+## 13. Logging and observability
+
+**Decision**: console JSON nativa, con sólo la categoría `Orders.Api` habilitada para eventos
+aplicativos. Se suprimen categorías de framework/provider capaces de emitir path/query, connection
+detail o exception text (`Microsoft.AspNetCore.*`, `Microsoft.Data.Sqlite`,
+`Microsoft.Hosting.Lifetime`); startup usa un evento custom seguro. Campos permitidos:
+
+- `operation`: `startup`, `create_order`, `get_order`, `reject_missing_order_id`;
+- `httpStatus`;
+- `outcome`: `succeeded`, `rejected`, `not_found`, `unavailable`, `failed`,
+  `client_disconnected`;
+- `durationMs`;
+- `traceId`;
+- `failureCategory` del catálogo cerrado de `plan.md`.
+
+`operation` es a la vez nombre lógico del evento; no se agrega otro campo. Information para
+éxito/4xx funcional; Warning para indisponibilidad, colisión, rollback o desconexión; Error para
+startup/500. `traceId` coincide con Problem Details. Categorías cubren
+startup/schema, parsing/validation, gate/busy, storage, collision, rollback, commit, 503 y 500.
+
+Prohibido: bodies, customer/product/order IDs, raw path/query, sensitive headers, connection string,
+physical DB path, SQL/parameters y exception detail no revisado. Baseline registra categoría, no
+exception object; el exception handler tampoco pasa la excepción a `ILogger`. Se verifica
+capturando logs y buscando valores canario de requests/configuración.
+
+Sin métricas exportadas ni distributed tracing. Reconsiderar con múltiples instancias, downstream
+services, SLO, alertas u on-call.
+
+**Rationale**: logs estructurados bastan para el diagnóstico de una sola PoC local y evitan nueva
+infraestructura/cardinalidad.
+
+**Alternatives considered**:
+
+- Serilog/OpenTelemetry/backend de métricas: rechazados por ausencia de consumidor operativo.
+- Request/response logging: rechazado por privacidad y porque expondría la capacidad `orderId`.
+
+Source: [JSON console formatter](https://learn.microsoft.com/en-us/dotnet/core/extensions/logging/console-log-formatter).
+
+## 14. Testing and reproducible performance
+
+**Decision**: MSTest + `WebApplicationFactory`, SQLite real y fixtures temporales. Cobertura:
+
+- unit: parsing-policy-adjacent DTO cases y todas las reglas semánticas acumulables;
+- contract: tres operaciones, statuses, headers, media types, schemas cerrados y catálogo;
+- integration: schema/pragmas, create/read, restart with same file, startup failures;
+- atomicity: cada frontera pre-commit y rollback sin parciales;
+- identity: collision attempts 1/2/3 con generador sustituible sólo en tests;
+- concurrency: reads before/after commit, no partial reads, writer saturation and busy timeout;
+- security/logging: no forbidden canary appears; traceId correlation;
+- load: 25 users, exact 25/75 POST/GET mix and p95 protocol;
+- usability: SC-005 manual siguiendo sólo quickstart.
+
+Protocolo SC-006:
+
+1. Release, loopback, host dedicado sin debugger/carga ajena.
+2. Warm-up en base descartable: dos ciclos por usuario, no medidos.
+3. Reiniciar con base limpia; crear 25 seed orders antes de medir.
+4. Liberar 25 usuarios por barrera.
+5. Cada usuario ejecuta cinco ciclos secuenciales: POST + GET propia + dos GET de seeds.
+6. Total: 500 operaciones, 125 POST y 375 GET.
+7. Medir desde antes de `SendAsync` hasta después de leer todo el body.
+8. p95 nearest-rank: ordenar N duraciones exitosas y tomar `ceil(0.95*N)`.
+9. Reportar por separado `201`, `200`, `503`, timeouts y otros errores.
+10. Pasar sólo con p95 `< 2.000 ms`, cero `503`, cero timeouts y cero errores inesperados.
+
+**Rationale**: sincronizar el POST inicial de cada ciclo estresa el único writer y los GET prueban
+la capacidad de consulta/reader concurrency. El número fijo hace el resultado repetible sin
+herramienta externa.
+
+**Alternatives considered**:
+
+- 100% writes: útil como stress, pero no representa ambas capacidades; queda en suite de
+  concurrencia, no SC-006.
+- Herramienta de load externa: rechazada; 25 usuarios caben en harness .NET.
+- Incluir 400/404 en población de latencia: rechazado; SC-006 mide flujos exitosos y los errores se
+  reportan aparte.
+
+Sources:
+[MSTest SDK](https://learn.microsoft.com/en-us/dotnet/core/testing/unit-testing-mstest-sdk),
+[ASP.NET Core integration tests](https://learn.microsoft.com/en-us/aspnet/core/test/integration-tests?view=aspnetcore-10.0).
+
+## 15. Automation and traceability
+
+**Decision**: `global.json`, central package versions, lock files y `scripts/verify.ps1`. El script
+ejecuta locked restore, Release build con warnings-as-errors y test categories, propagando exit code.
+La matriz bidireccional de `plan.md` relaciona grupos FR/SR/SC con diseño, model, OpenAPI y
+quickstart.
+
+**Rationale**: hace reproducibles los gates sin crear CI/proveedor ni scripts Bash.
+
+**Alternatives considered**:
+
+- Docker/CI como prerrequisito: rechazados; no son necesarios para build/test local.
+- Pasos manuales ocultos: rechazados por la Constitution.
 
 ## Research conclusion
 
-Todas las decisiones técnicas necesarias quedaron resueltas. No se detectó una decisión de negocio
-que requiera modificar `spec.md` y no quedan aclaraciones pendientes.
+Las decisiones materiales están resueltas sin añadir negocio, autenticación, idempotencia, rate
+limiting, escalado horizontal ni observabilidad externa. La revisión post-design encontró evidencia
+para los 40 checks y cero contradicciones o clarificaciones técnicas pendientes; el resultado
+coincide con `plan.md`: `READY FOR TASKS`.

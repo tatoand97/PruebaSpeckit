@@ -10,9 +10,15 @@
 
 ## Scope
 
-Esta feature permite registrar una orden para un cliente con uno o más productos y consultar posteriormente esa orden mediante el identificador único asignado por el sistema.
+Esta feature contiene exactamente dos capacidades de negocio: crear una orden para un cliente con
+uno o más productos y consultar posteriormente una orden mediante el identificador único asignado
+por el sistema.
 
 Quedan fuera del alcance los pagos, el inventario, los descuentos, el envío, la cancelación, la modificación de órdenes, la autenticación de usuarios y cualquier integración con sistemas externos. La especificación no define arquitectura, estructura de proyectos, tecnología de exposición, mecanismo de persistencia, base de datos, ORM, librerías ni código.
+
+El contrato HTTP aprobado representa esas dos capacidades mediante tres operaciones:
+`POST /orders`, `GET /orders/{orderId}` y `GET /orders`. La última existe exclusivamente para
+rechazar con `400` una consulta que omitió el identificador; nunca enumera ni busca órdenes.
 
 ## Clarifications
 
@@ -23,6 +29,27 @@ Quedan fuera del alcance los pagos, el inventario, los descuentos, el envío, la
 - Q: ¿Debe la PoC aceptar cualquier identificador no vacío de cliente y producto, o comprobar que corresponda a registros conocidos? → A: Aceptar cualquier identificador no vacío, sin comprobar su existencia.
 - Q: Si el mismo producto aparece varias veces en una solicitud, ¿cómo debe quedar representado en la orden? → A: Rechazar toda la solicitud e informar el producto duplicado.
 - Q: ¿Qué límites de capacidad deben formar parte del contrato verificable de la PoC? → A: Mantener 25 usuarios simultáneos, sin máximos de negocio para productos o cantidades.
+
+## Approved Behavioral Decisions
+
+- Una orden confirmada sobrevive reinicios del proceso y del host mientras se conserve el
+  almacenamiento SQLite persistente. Recrear por completo el entorno o eliminar, reemplazar o
+  perder ese almacenamiento queda fuera de la garantía.
+- Una respuesta `201` sólo puede emitirse después de confirmar toda la orden. Todo `503` de
+  creación garantiza que no se confirmó una orden. Si el commit terminó pero la respuesta se
+  pierde o el cliente no puede saber si la recibió, la orden puede existir; como no hay
+  idempotencia, reenviar la solicitud puede crear otra orden.
+- Los identificadores de orden son UUID v4. La primary key persistente es la garantía definitiva
+  de unicidad. Una colisión provoca rollback y un nuevo UUID, con tres intentos totales; agotar los
+  tres produce `500` genérico y ninguna orden confirmada.
+- La PoC ejecuta una sola instancia. Una lectura anterior al commit puede responder `404`, ninguna
+  lectura puede observar una orden parcial y las consultas posteriores al commit pueden leer la
+  orden. Ese `404` no impide que una creación concurrente se confirme después.
+- `POST /orders` admite como máximo 1 MiB (1.048.576 bytes) de cuerpo HTTP. Es un límite operativo,
+  no de negocio; excederlo produce `413`, no trunca datos y no crea ninguna orden.
+- Todos los errores producidos por la aplicación usan Problem Details. Rechazos o fallos del host
+  que ocurran fuera del pipeline controlado —por ejemplo ciertos `413`, `405`, timeouts o
+  desconexiones— no tienen esa garantía.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -80,15 +107,19 @@ Un cliente recibe una explicación clara cuando intenta crear una orden inválid
 - Si la colección de productos falta o está vacía, la solicitud completa se rechaza.
 - Si un producto no tiene identificador, su identificador está vacío o contiene solamente espacios, la solicitud completa se rechaza.
 - Si un identificador de cliente o producto contiene al menos un carácter distinto de espacio, no se rechaza por ser desconocido.
-- Si una cantidad falta, no es un número entero, es cero o es negativa, la solicitud completa se rechaza.
+- Si una cantidad falta, es nula, no usa una representación JSON aceptable como `Int64`, está fuera
+  del rango `Int64`, es cero o es negativa, la solicitud completa se rechaza.
 - Si una cantidad positiva no puede aceptarse exactamente, la solicitud completa se rechaza; el valor nunca se trunca, redondea ni altera silenciosamente.
 - Si el mismo identificador de producto aparece más de una vez en una solicitud, la solicitud completa se rechaza indicando el duplicado.
 - Si una solicitud contiene productos válidos e inválidos, ningún producto de esa solicitud da lugar a una orden parcial.
-- Si ocurre cualquier fallo antes de confirmar la creación completa, no queda disponible una orden parcial ni una orden que aparente haberse creado correctamente.
+- Si ocurre cualquier fallo antes de confirmar la creación completa, no queda disponible una orden
+  parcial. Un `503` de creación siempre significa que no hubo commit; un `500` o una desconexión
+  durante una frontera de resultado incierto no autoriza a asumir que la orden no existe.
 - Si se envía dos veces la misma solicitud válida, cada envío se considera una intención de creación independiente y produce una orden distinta con identificador único.
 - Si varias solicitudes se crean simultáneamente, ninguna combinación de concurrencia puede producir identificadores de orden duplicados.
 - Si el identificador de consulta falta, está vacío o contiene solamente espacios, la consulta se rechaza como inválida; si es un identificador no vacío que no corresponde a una orden, el resultado es "orden no encontrada".
-- Los identificadores se consideran valores opacos: para consultar una orden se usa sin alteraciones el identificador devuelto al crearla.
+- Los identificadores se consideran valores opacos: para consultar una orden se usa sin
+  alteraciones la ruta `Location` devuelta al crearla.
 
 ## Requirements *(mandatory)*
 
@@ -98,33 +129,63 @@ Un cliente recibe una explicación clara cuando intenta crear una orden inválid
 - **FR-002**: Cada producto solicitado MUST incluir un identificador de producto y una cantidad.
 - **FR-003**: El identificador del cliente y cada identificador de producto MUST contener al menos un carácter distinto de espacio. Cualquier identificador que cumpla esta regla MUST aceptarse sin comprobar su existencia.
 - **FR-004**: Una orden MUST contener como mínimo un producto.
-- **FR-005**: La cantidad de cada producto MUST ser un número entero mayor que cero.
+- **FR-005**: La cantidad de cada producto MUST ser un número entero mayor que cero representable
+  exactamente como `Int64`; fracciones, notación exponencial y valores fuera de ese rango MUST
+  rechazarse sin conversión.
 - **FR-006**: Cada identificador de producto MUST aparecer una sola vez dentro de una misma solicitud de creación; si se repite, el sistema MUST rechazar la solicitud completa e informar cuál producto está duplicado.
 - **FR-007**: El sistema MUST validar la solicitud completa antes de crear cualquier parte de la orden.
-- **FR-008**: Si una solicitud de creación incumple una o más reglas, el sistema MUST rechazarla completa, informar claramente todas las reglas incumplidas detectadas durante la validación y MUST NOT crear una orden total ni parcial.
-- **FR-009**: Por cada solicitud válida aceptada, el sistema MUST crear exactamente una orden nueva, aunque sus datos sean idénticos a los de una solicitud anterior.
-- **FR-010**: El sistema MUST asignar a cada orden creada un identificador de orden único que no haya sido asignado a ninguna otra orden.
+- **FR-008**: Si un documento JSON correctamente deserializable incumple una o más reglas
+  semánticas, el sistema MUST rechazarlo completo, informar todas las reglas semánticas
+  incumplidas que puedan detectarse a partir de ese documento y MUST NOT crear una orden total ni
+  parcial. Un fallo de parsing, tipo o rango puede impedir evaluar reglas semánticas posteriores,
+  pero MUST comunicar que el body no pudo interpretarse.
+- **FR-009**: Por cada solicitud válida aceptada, el sistema MUST crear exactamente una orden nueva,
+  aunque sus datos sean idénticos a los de una solicitud anterior. La feature MUST NOT implementar
+  claves de idempotencia.
+- **FR-010**: El sistema MUST asignar a cada orden creada un UUID v4 único que no haya sido asignado
+  a ninguna otra orden retenida. La restricción persistente de unicidad es definitiva; ante
+  colisión se permiten tres intentos totales y, si se agotan, la solicitud MUST terminar en `500`
+  genérico sin orden confirmada.
 - **FR-011**: El identificador asignado MUST devolverse como parte de la confirmación de creación.
 - **FR-012**: Toda orden nueva MUST comenzar en estado `Pending`.
 - **FR-013**: La confirmación de creación MUST permitir conocer el identificador asignado y el estado inicial de la orden.
-- **FR-014**: Una orden creada MUST quedar disponible para consulta posterior durante la vida útil de la PoC.
+- **FR-014**: Una orden confirmada MUST quedar disponible para consultas posteriores y sobrevivir
+  reinicios del proceso y del host mientras se conserve el almacenamiento SQLite persistente.
+  Recrear el entorno o eliminar, reemplazar o perder ese almacenamiento queda fuera de la garantía.
 - **FR-015**: El sistema MUST permitir que cualquier solicitante consulte una orden utilizando el identificador exacto devuelto al crearla, sin exigir otro dato para autorizar la consulta.
 - **FR-016**: Una consulta exitosa MUST devolver el identificador de la orden, el identificador del cliente, cada identificador de producto con su cantidad solicitada y el estado de la orden.
 - **FR-017**: La orden consultada MUST conservar sin pérdida ni sustitución los identificadores de producto y las cantidades aceptadas durante su creación.
-- **FR-018**: Si no existe una orden asociada al identificador consultado, el sistema MUST informar claramente que la orden no fue encontrada y MUST NOT devolver datos pertenecientes a otra orden.
-- **FR-019**: Una consulta cuyo identificador de orden falte, esté vacío o contenga solamente espacios MUST rechazarse como solicitud inválida y distinguirse del resultado de una orden no encontrada.
+- **FR-018**: Si `GET /orders/{orderId}` no encuentra coincidencia binaria para el identificador
+  utilizable que llegó al endpoint, el sistema MUST responder `404`, informar que la orden no fue
+  encontrada y MUST NOT devolver datos pertenecientes a otra orden.
+- **FR-019**: `GET /orders` MUST responder `400` y nunca enumerar órdenes. Un `orderId` vacío o sólo
+  whitespace que llegue a `GET /orders/{orderId}` también MUST responder `400` y distinguirse de
+  `404`.
 - **FR-020**: El sistema MUST garantizar que dos órdenes distintas nunca compartan el mismo identificador, incluso cuando sus solicitudes de creación sean simultáneas o contengan los mismos datos.
-- **FR-021**: La feature MUST NOT establecer un máximo de negocio para la cantidad de productos distintos por orden ni para una cantidad positiva por producto. Cualquier límite operativo de protección MUST conservar el rechazo completo y explícito definido en FR-008, sin truncar, redondear ni crear parcialmente la orden.
+- **FR-021**: La feature MUST NOT establecer un máximo de negocio para la cantidad de productos
+  distintos por orden ni para una cantidad positiva representable por producto. `POST /orders`
+  MUST aplicar un límite de transporte de 1 MiB (1.048.576 bytes) al cuerpo HTTP; excederlo produce
+  `413`, sin truncar, redondear ni crear total o parcialmente la orden.
 
 ### Security and Privacy Considerations *(mandatory)*
 
 - **SR-001**: Todo identificador de cliente, identificador de producto, cantidad e identificador de consulta recibido desde fuera del límite de confianza MUST validarse antes de crear una orden o utilizarse para localizarla.
-- **SR-002**: Debido a que la autenticación y autorización están fuera del alcance de esta PoC, conocer el identificador exacto de una orden MUST ser suficiente para consultarla y la feature MUST utilizarse únicamente en un entorno controlado con identificadores y datos sintéticos o no sensibles.
+- **SR-002**: Debido a que la autenticación y autorización están fuera del alcance, conocer el
+  identificador exacto MUST ser suficiente para consultar la orden. La PoC MUST ejecutarse sólo en
+  loopback local o una red de desarrollo aislada, sin exposición pública a Internet, con datos
+  exclusivamente sintéticos o clasificados como no sensibles y sin credenciales reales. TLS no es
+  obligatorio en loopback; cualquier exposición fuera de loopback o de la red controlada queda
+  fuera del alcance y requiere autenticación, autorización y revisión de seguridad.
 - **SR-003**: El identificador de orden asignado MUST NOT incorporar de forma legible el identificador del cliente, los identificadores de producto ni el contenido de la orden.
 - **SR-004**: Una consulta exitosa MUST exponer únicamente los datos de la orden solicitada necesarios para satisfacer FR-016; no debe incluir información de otras órdenes o clientes.
 - **SR-005**: Los mensajes de validación y de orden no encontrada MUST ser suficientes para que el cliente comprenda el resultado, pero MUST NOT revelar datos de otras órdenes, secretos, credenciales ni detalles internos del sistema.
 - **SR-006**: La feature MUST NOT solicitar ni conservar credenciales, tokens, información de pago, datos de envío ni otros datos personales que no sean necesarios para identificar al cliente en esta PoC.
-- **SR-007**: Cualquier registro operativo o evidencia de diagnóstico que se produzca MUST NOT incluir secretos, credenciales, identificadores de cliente ni el contenido completo de las órdenes.
+- **SR-007**: Los registros operativos MUST ser JSON estructurado y limitarse al nombre lógico de
+  operación, código HTTP, resultado lógico, duración en milisegundos, `traceId` y una categoría
+  operacional segura. MUST NOT registrar request/response body, `customerId`, `productId`,
+  `orderId`, ruta HTTP cruda con identificadores, query string cruda, headers sensibles,
+  connection string, ruta física de SQLite, SQL ni parámetros SQL. Las respuestas MUST NOT exponer
+  stack traces.
 
 ### Key Entities *(include if feature involves data)*
 
@@ -137,18 +198,33 @@ Un cliente recibe una explicación clara cuando intenta crear una orden inválid
 ### Measurable Outcomes
 
 - **SC-001**: El 100% de las solicitudes válidas del conjunto de aceptación crea exactamente una orden con identificador único y estado inicial `Pending`.
-- **SC-002**: El 100% de las solicitudes inválidas del conjunto de aceptación crea cero órdenes y comunica al menos una razón concreta del rechazo.
+- **SC-002**: El 100% de las solicitudes inválidas del conjunto de aceptación crea cero órdenes.
+  Para cada documento JSON correctamente deserializable comunica todas las reglas semánticas
+  incumplidas detectables; para fallos de parsing, tipo o rango comunica de forma estable que el
+  body no pudo interpretarse, sin exigir validaciones semánticas que ese fallo impide.
 - **SC-003**: El 100% de las consultas de órdenes existentes del conjunto de aceptación devuelve la orden correcta con todos los identificadores de producto y cantidades aceptadas, sin datos de otra orden.
 - **SC-004**: El 100% de las consultas con identificadores inexistentes del conjunto de aceptación informa claramente "orden no encontrada", mientras que el 100% de las consultas sin identificador utilizable se informa como solicitud inválida.
 - **SC-005**: Al menos el 95% de los participantes de una prueba de aceptación puede crear una orden válida y consultarla por su identificador en menos de 2 minutos, sin asistencia.
-- **SC-006**: Bajo la carga objetivo de la PoC de hasta 25 usuarios simultáneos, al menos el 95% de las solicitudes de creación y consulta muestra un resultado al usuario en menos de 2 segundos.
-- **SC-007**: El 100% de los datos utilizados durante la PoC es sintético o ha sido clasificado previamente como no sensible.
+- **SC-006**: Bajo el protocolo reproducible de carga definido en `quickstart.md`, con 25 usuarios
+  virtuales concurrentes y mezcla explícita de creación y consulta, al menos el 95% de las
+  operaciones exitosas medidas debe completar estrictamente en menos de 2 segundos end-to-end,
+  desde el envío HTTP hasta leer la respuesta completa. Los `503` se contabilizan como operaciones
+  fallidas, no como cumplimiento de latencia, y no puede haber errores inesperados.
+- **SC-007**: El 100% de requests, archivos SQLite y evidencias de aceptación de la PoC usa datos
+  sintéticos generados para la prueba o datos con clasificación no sensible registrada antes de
+  usarlos; nunca credenciales ni datos reales no clasificados.
 
 ## Assumptions
 
 - Una cantidad representa unidades enteras; no se admiten cantidades fraccionarias.
-- Una orden permanece consultable durante la vida útil del entorno de la PoC. La eliminación, el archivado y una política de retención de producción están fuera del alcance.
-- Como no hay autenticación ni autorización en alcance, cualquier solicitante que conozca el identificador exacto puede consultar la orden; por ello se asume un entorno controlado que no contiene datos personales reales, secretos ni información comercial sensible.
+- Una orden permanece consultable tras reinicios de proceso y host mientras se conserve el archivo
+  SQLite persistente y sus archivos auxiliares necesarios para recuperación. La recreación del
+  entorno, la pérdida o eliminación del almacenamiento, el archivado y una política de retención de
+  producción están fuera del alcance.
+- Como no hay autenticación ni autorización, cualquier solicitante que conozca el identificador
+  exacto puede consultar la orden. El responsable de ejecutar la PoC debe enlazarla a loopback o
+  aislarla en una red de desarrollo y asegurar que sólo se usen datos sintéticos/no sensibles.
 - La modificación, cancelación y transición de estado no forman parte de esta feature; por ello, las órdenes permanecen en `Pending` dentro de su alcance.
 - No se requiere disponibilidad de pagos, inventario, descuentos, envío ni sistemas externos para crear o consultar órdenes.
-- No se asume ninguna interfaz, protocolo o canal de interacción específico; los escenarios describen el resultado observable por el cliente independientemente de cómo se exponga el sistema.
+- La interfaz de esta feature es HTTP JSON con las tres operaciones aprobadas. No se asume
+  frontend, protocolo adicional ni exposición pública.
