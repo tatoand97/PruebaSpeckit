@@ -1,0 +1,346 @@
+openapi: 3.1.0
+info:
+  title: Orders PoC API
+  version: 1.0.0
+  description: >
+    Contrato HTTP para crear una orden y consultarla por el identificador opaco
+    devuelto. No existe autenticación en esta PoC; debe ejecutarse en un entorno
+    controlado con datos sintéticos o no sensibles.
+servers:
+  - url: http://127.0.0.1:5080
+    description: Ejecución local reproducible
+paths:
+  /orders:
+    post:
+      operationId: createOrder
+      summary: Crear una orden
+      description: >
+        Cada solicitud válida crea una orden nueva, aunque repita exactamente el
+        contenido de otra solicitud. La validación semántica acumula todos los
+        errores detectables y una solicitud rechazada no crea filas.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateOrderRequest'
+            examples:
+              valid:
+                value:
+                  customerId: customer-001
+                  items:
+                    - productId: product-A
+                      quantity: 2
+                    - productId: product-B
+                      quantity: 1
+              duplicateProduct:
+                value:
+                  customerId: customer-001
+                  items:
+                    - productId: product-A
+                      quantity: 1
+                    - productId: product-A
+                      quantity: 2
+      responses:
+        '201':
+          description: Orden creada y confirmada completamente.
+          headers:
+            Location:
+              required: true
+              description: Ruta relativa para consultar la orden creada.
+              schema:
+                type: string
+                example: /orders/0f8fad5b-d9cb-469f-a165-70867728950e
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateOrderResponse'
+              example:
+                orderId: 0f8fad5b-d9cb-469f-a165-70867728950e
+                status: Pending
+        '400':
+          description: JSON inválido o una o más reglas de creación incumplidas.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ValidationProblem'
+              examples:
+                multipleValidationErrors:
+                  value:
+                    type: urn:orders:problem:validation
+                    title: La solicitud no es válida.
+                    status: 400
+                    detail: Se detectaron uno o más errores de validación.
+                    instance: /orders
+                    traceId: 00-f067aa0ba902b7-1b08e6c8f05f13-00
+                    errors:
+                      customerId:
+                        - El identificador del cliente debe contener al menos un carácter distinto de espacio.
+                      items[0].quantity:
+                        - La cantidad debe ser un número entero mayor que cero.
+                duplicateProduct:
+                  value:
+                    type: urn:orders:problem:validation
+                    title: La solicitud no es válida.
+                    status: 400
+                    detail: Se detectaron uno o más errores de validación.
+                    instance: /orders
+                    traceId: 00-f067aa0ba902b7-1b08e6c8f05f13-00
+                    errors:
+                      items:
+                        - El identificador de producto 'product-A' aparece más de una vez.
+                malformedBody:
+                  value:
+                    type: urn:orders:problem:invalid-body
+                    title: El cuerpo JSON no es válido.
+                    status: 400
+                    detail: El cuerpo debe ser JSON válido y respetar los tipos declarados.
+                    instance: /orders
+                    traceId: 00-f067aa0ba902b7-1b08e6c8f05f13-00
+                    errors:
+                      body:
+                        - No fue posible interpretar el cuerpo de la solicitud.
+        '413':
+          description: >
+            El tamaño excede un límite operativo del host. No es un máximo de
+            negocio y no se crea ninguna parte de la orden.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '503':
+          description: La persistencia está temporalmente ocupada o no disponible; no se confirmó una orden.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              example:
+                type: urn:orders:problem:temporarily-unavailable
+                title: El servicio no está disponible temporalmente.
+                status: 503
+                detail: La operación no pudo completarse. Intente nuevamente.
+                instance: /orders
+                traceId: 00-f067aa0ba902b7-1b08e6c8f05f13-00
+    get:
+      operationId: rejectMissingOrderId
+      summary: Rechazar una consulta sin identificador
+      description: >
+        Esta operación existe para distinguir una consulta sin identificador de
+        una consulta por un identificador no encontrado. No enumera órdenes.
+      responses:
+        '400':
+          description: Falta el identificador de orden.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ValidationProblem'
+              example:
+                type: urn:orders:problem:validation
+                title: La solicitud no es válida.
+                status: 400
+                detail: Se detectaron uno o más errores de validación.
+                instance: /orders
+                traceId: 00-f067aa0ba902b7-1b08e6c8f05f13-00
+                errors:
+                  orderId:
+                    - Debe proporcionar el identificador exacto de la orden.
+  /orders/{orderId}:
+    get:
+      operationId: getOrder
+      summary: Consultar una orden por identificador exacto
+      description: >
+        El identificador se trata como texto opaco y no se normaliza. Un valor
+        no vacío que no coincida exactamente con una orden devuelve 404, aunque
+        no tenga formato UUID.
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          description: Identificador exacto devuelto por POST /orders.
+          schema:
+            type: string
+          examples:
+            generated:
+              value: 0f8fad5b-d9cb-469f-a165-70867728950e
+            nonMatchingOpaqueValue:
+              value: not-a-generated-id
+      responses:
+        '200':
+          description: Orden encontrada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderResponse'
+              example:
+                orderId: 0f8fad5b-d9cb-469f-a165-70867728950e
+                customerId: customer-001
+                items:
+                  - productId: product-A
+                    quantity: 2
+                  - productId: product-B
+                    quantity: 1
+                status: Pending
+        '400':
+          description: El segmento existe pero está vacío o contiene solamente whitespace tras decodificarlo.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ValidationProblem'
+              example:
+                type: urn:orders:problem:validation
+                title: La solicitud no es válida.
+                status: 400
+                detail: Se detectaron uno o más errores de validación.
+                instance: /orders/%20
+                traceId: 00-f067aa0ba902b7-1b08e6c8f05f13-00
+                errors:
+                  orderId:
+                    - El identificador de orden debe contener al menos un carácter distinto de espacio.
+        '404':
+          description: No existe una orden con coincidencia exacta.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              example:
+                type: urn:orders:problem:not-found
+                title: Orden no encontrada.
+                status: 404
+                detail: No existe una orden asociada al identificador proporcionado.
+                instance: /orders/not-a-generated-id
+                traceId: 00-f067aa0ba902b7-1b08e6c8f05f13-00
+        '503':
+          description: La persistencia no está disponible temporalmente.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+components:
+  schemas:
+    CreateOrderRequest:
+      type: object
+      required:
+        - customerId
+        - items
+      properties:
+        customerId:
+          type: string
+          description: >
+            Identificador opaco. Debe contener al menos un carácter no-whitespace;
+            se acepta aunque sea desconocido y se conserva sin alteración.
+        items:
+          type: array
+          minItems: 1
+          description: >
+            No existe máximo de negocio. ProductId debe ser único dentro de la
+            solicitud mediante comparación ordinal exacta.
+          items:
+            $ref: '#/components/schemas/OrderItemInput'
+    OrderItemInput:
+      type: object
+      required:
+        - productId
+        - quantity
+      properties:
+        productId:
+          type: string
+          description: >
+            Debe contener al menos un carácter no-whitespace; se acepta aunque
+            sea desconocido y se conserva sin alteración.
+        quantity:
+          type: integer
+          format: int64
+          minimum: 1
+          description: >
+            Cantidad exacta positiva. No se trunca ni redondea. Un valor fuera del
+            rango Int64 se rechaza explícitamente como body inválido.
+    CreateOrderResponse:
+      type: object
+      required:
+        - orderId
+        - status
+      properties:
+        orderId:
+          type: string
+          description: UUID v4 canónico que debe tratarse como opaco.
+        status:
+          $ref: '#/components/schemas/OrderStatus'
+    OrderResponse:
+      type: object
+      required:
+        - orderId
+        - customerId
+        - items
+        - status
+      properties:
+        orderId:
+          type: string
+        customerId:
+          type: string
+        items:
+          type: array
+          minItems: 1
+          description: La posición de los elementos no tiene semántica de negocio.
+          items:
+            $ref: '#/components/schemas/OrderItem'
+        status:
+          $ref: '#/components/schemas/OrderStatus'
+    OrderItem:
+      type: object
+      required:
+        - productId
+        - quantity
+      properties:
+        productId:
+          type: string
+        quantity:
+          type: integer
+          format: int64
+          minimum: 1
+    OrderStatus:
+      type: string
+      enum:
+        - Pending
+    Problem:
+      type: object
+      required:
+        - type
+        - title
+        - status
+        - detail
+        - traceId
+      properties:
+        type:
+          type: string
+          format: uri-reference
+        title:
+          type: string
+        status:
+          type: integer
+          minimum: 400
+          maximum: 599
+        detail:
+          type: string
+        instance:
+          type: string
+          format: uri-reference
+        traceId:
+          type: string
+          description: Identificador de correlación; no identifica una orden.
+    ValidationProblem:
+      allOf:
+        - $ref: '#/components/schemas/Problem'
+        - type: object
+          required:
+            - errors
+          properties:
+            errors:
+              type: object
+              description: >
+                Claves estables: body, customerId, items, items[n].productId,
+                items[n].quantity u orderId.
+              additionalProperties:
+                type: array
+                minItems: 1
+                items:
+                  type: string

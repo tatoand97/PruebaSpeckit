@@ -130,7 +130,7 @@ Un cliente recibe una explicación clara cuando intenta crear una orden inválid
 
 - **Orden**: Representa una solicitud registrada de productos para un cliente. Sus atributos relevantes son el identificador único de orden, el identificador del cliente, uno o más elementos de orden y el estado, que inicialmente es `Pending`.
 - **Elemento de orden**: Representa un producto solicitado dentro de una orden. Contiene un identificador de producto y una cantidad entera mayor que cero. Un producto aparece como máximo una vez por orden.
-- **Cliente**: Actor que solicita la creación y posterior consulta de una orden. Para esta feature se representa únicamente mediante un identificador opaco; la gestión del cliente y su autenticación están fuera de alcance.
+- **Cliente**: Actor identificado en la solicitud de creación de una orden. Para esta feature se representa únicamente mediante un identificador opaco; la gestión del cliente y su autenticación están fuera de alcance. La consulta posterior puede realizarla cualquier solicitante que conozca el identificador exacto de la orden.
 
 ## Success Criteria *(mandatory)*
 
