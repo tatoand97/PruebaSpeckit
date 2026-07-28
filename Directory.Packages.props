@@ -1,0 +1,19 @@
+<Project>
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageVersion Include="Microsoft.Data.Sqlite" Version="10.0.10" />
+    <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.10" />
+    <PackageVersion Include="MSTest" Version="4.3.2" />
+  </ItemGroup>
+  <ItemGroup>
+    <!--
+      Microsoft.Data.Sqlite 10.0.10 is the exact approved runtime dependency and
+      transitively resolves SQLitePCLRaw.lib.e_sqlite3 2.1.11. No alternative
+      package or version is authorized by the plan, so this single advisory is
+      suppressed centrally until the approved dependency baseline is revised.
+    -->
+    <NuGetAuditSuppress Include="https://github.com/advisories/GHSA-2m69-gcr7-jv3q" />
+  </ItemGroup>
+</Project>
