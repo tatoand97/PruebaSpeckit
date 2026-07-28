@@ -204,13 +204,12 @@ Un cliente recibe una explicación clara cuando intenta crear una orden inválid
   body no pudo interpretarse, sin exigir validaciones semánticas que ese fallo impide.
 - **SC-003**: El 100% de las consultas de órdenes existentes del conjunto de aceptación devuelve la orden correcta con todos los identificadores de producto y cantidades aceptadas, sin datos de otra orden.
 - **SC-004**: El 100% de las consultas con identificadores inexistentes del conjunto de aceptación informa claramente "orden no encontrada", mientras que el 100% de las consultas sin identificador utilizable se informa como solicitud inválida.
-- **SC-005**: Al menos el 95% de los participantes de una prueba de aceptación puede crear una orden válida y consultarla por su identificador en menos de 2 minutos, sin asistencia.
-- **SC-006**: Bajo el protocolo reproducible de carga definido en `quickstart.md`, con 25 usuarios
+- **SC-005**: Bajo el protocolo reproducible de carga definido en `quickstart.md`, con 25 usuarios
   virtuales concurrentes y mezcla explícita de creación y consulta, al menos el 95% de las
   operaciones exitosas medidas debe completar estrictamente en menos de 2 segundos end-to-end,
   desde el envío HTTP hasta leer la respuesta completa. Los `503` se contabilizan como operaciones
   fallidas, no como cumplimiento de latencia, y no puede haber errores inesperados.
-- **SC-007**: El 100% de requests, archivos SQLite y evidencias de aceptación de la PoC usa datos
+- **SC-006**: El 100% de requests, archivos SQLite y evidencias de aceptación de la PoC usa datos
   sintéticos generados para la prueba o datos con clasificación no sensible registrada antes de
   usarlos; nunca credenciales ni datos reales no clasificados.
 

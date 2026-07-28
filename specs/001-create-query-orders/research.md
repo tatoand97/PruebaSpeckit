@@ -172,8 +172,18 @@ fallo pre-commit revierte. `201` sólo se intenta después del retorno exitoso d
 su resultado, se clasifica `500`/desconexión, nunca `503`. Si commit terminó y la respuesta se pierde,
 la orden puede existir aunque el cliente no conozca el resultado. Un retry puede crear otra orden.
 
+**Minimal testability mechanism**: `SqliteOrderStore.cs` conserva delegates internos, no-op por
+default, inmediatamente antes de `BEGIN`, después del insert de `orders`, después de todos los
+inserts de items, antes de commit y después de commit. `Program.cs` conserva un único delegate
+interno después de commit y antes de construir/escribir la respuesta. `InternalsVisibleTo` da
+acceso sólo a `Orders.Api.Tests`. Las pruebas pueden hacer que esos delegates bloqueen con
+`Barrier`/`ManualResetEventSlim` o lancen un fallo determinista; producción no los configura. El
+generador UUID sustituible puede integrarse en el mismo mecanismo o permanecer separado.
+
 **Rationale**: la transacción evita estados parciales; no hay compensación ni recurso distribuido.
 La ausencia deliberada de idempotencia hace necesario documentar, no ocultar, el resultado incierto.
+Estos seams observan/provocan las fronteras reales sin introducir delays, capas, Repository, Unit
+of Work, framework de mocks/fault injection, paquetes ni proyectos.
 
 **Alternatives considered**:
 
@@ -335,19 +345,27 @@ binding/firewall. Salir de ese límite requiere auth, authz, revisión de red/TL
 No implementar rate limiting: entorno aislado, 25 usuarios de aceptación y no exposición pública.
 Reevaluar antes de exposición no controlada o incremento material de carga.
 
-SC-007 se evidencia con fixtures de nombres sintéticos, revisión del archivo SQLite/evidencia y un
-registro previo de clasificación para cualquier dato no generado. Dato real no clasificado bloquea
-la ejecución.
+SC-006 se evidencia automáticamente con fixtures controlados de nombres sintéticos, inspección de
+los archivos SQLite/reportes producidos por la suite y validaciones de ausencia de canarios
+prohibidos. Cualquier fixture externo requeriría un registro previo de clasificación no sensible;
+la baseline no depende de datasets externos ni de revisión por participantes humanos.
 
 **Rationale**: auth y rate limiting no aportan al ejercicio si el boundary se cumple; documentar al
 responsable evita presentar la API anónima como segura fuera de él.
 
 ## 13. Logging and observability
 
-**Decision**: console JSON nativa, con sólo la categoría `Orders.Api` habilitada para eventos
-aplicativos. Se suprimen categorías de framework/provider capaces de emitir path/query, connection
-detail o exception text (`Microsoft.AspNetCore.*`, `Microsoft.Data.Sqlite`,
-`Microsoft.Hosting.Lifetime`); startup usa un evento custom seguro. Campos permitidos:
+**Decision**: usar el formatter JSON console nativo de
+`Microsoft.Extensions.Logging.Console`, sin formatter propio. Configurarlo explícitamente como
+JSON de una entrada por línea (`JsonWriterOptions.Indented=false`), UTC
+(`UseUtcTimestamp=true`), timestamp explícito y `IncludeScopes=false`.
+
+El formatter es propietario del envelope JSON, que puede contener los campos nativos configurados
+`Timestamp`, `EventId`, `LogLevel`, `Category`, `Message` y `State`. Esos campos no forman parte del
+catálogo de propiedades aplicativas. En .NET 10, `Message` normalmente está en el nivel superior y
+no se duplica dentro de `State`.
+
+El contrato cerrado dentro de `State` permite estas seis propiedades aplicativas:
 
 - `operation`: `startup`, `create_order`, `get_order`, `reject_missing_order_id`;
 - `httpStatus`;
@@ -356,6 +374,16 @@ detail o exception text (`Microsoft.AspNetCore.*`, `Microsoft.Data.Sqlite`,
 - `durationMs`;
 - `traceId`;
 - `failureCategory` del catálogo cerrado de `plan.md`.
+
+También puede aparecer metadata generada por el formatter, como `{OriginalFormat}`; no se considera
+propiedad aplicativa. La suite comprueba el envelope nativo esperado, la presencia y dominio de las
+seis propiedades aplicativas, ausencia de otras propiedades de aplicación, ausencia de datos
+sensibles y correlación exacta del `traceId`.
+
+Sólo la categoría `Orders.Api` queda habilitada para eventos aplicativos. Se suprimen categorías de
+framework/provider capaces de emitir path/query, connection detail o exception text
+(`Microsoft.AspNetCore.*`, `Microsoft.Data.Sqlite`, `Microsoft.Hosting.Lifetime`); startup usa un
+evento custom seguro.
 
 `operation` es a la vez nombre lógico del evento; no se agrega otro campo. Information para
 éxito/4xx funcional; Warning para indisponibilidad, colisión, rollback o desconexión; Error para
@@ -371,11 +399,13 @@ Sin métricas exportadas ni distributed tracing. Reconsiderar con múltiples ins
 services, SLO, alertas u on-call.
 
 **Rationale**: logs estructurados bastan para el diagnóstico de una sola PoC local y evitan nueva
-infraestructura/cardinalidad.
+infraestructura/cardinalidad. Separar envelope de `State` preserva el comportamiento nativo del
+formatter sin afirmar que las seis propiedades aplicativas son las únicas claves del JSON completo.
 
 **Alternatives considered**:
 
-- Serilog/OpenTelemetry/backend de métricas: rechazados por ausencia de consumidor operativo.
+- Formatter propio, Serilog, OpenTelemetry o backend de métricas: rechazados por ausencia de
+  necesidad/consumidor operativo.
 - Request/response logging: rechazado por privacidad y porque expondría la capacidad `orderId`.
 
 Source: [JSON console formatter](https://learn.microsoft.com/en-us/dotnet/core/extensions/logging/console-log-formatter).
@@ -385,27 +415,38 @@ Source: [JSON console formatter](https://learn.microsoft.com/en-us/dotnet/core/e
 **Decision**: MSTest + `WebApplicationFactory`, SQLite real y fixtures temporales. Cobertura:
 
 - unit: parsing-policy-adjacent DTO cases y todas las reglas semánticas acumulables;
-- contract: tres operaciones, statuses, headers, media types, schemas cerrados y catálogo;
+- contract: auditoría diferencial de tres operaciones, statuses, headers, media types, schemas
+  cerrados y catálogo contra `contracts/openapi.yaml`;
 - integration: schema/pragmas, create/read, restart with same file, startup failures;
-- atomicity: cada frontera pre-commit y rollback sin parciales;
+- atomicity: cada frontera pre-commit y rollback sin parciales mediante los delegates internos;
 - identity: collision attempts 1/2/3 con generador sustituible sólo en tests;
-- concurrency: reads before/after commit, no partial reads, writer saturation and busy timeout;
-- security/logging: no forbidden canary appears; traceId correlation;
-- load: 25 users, exact 25/75 POST/GET mix and p95 protocol;
-- usability: SC-005 manual siguiendo sólo quickstart.
+- concurrency: reads before/after commit sincronizadas con `Barrier`/`ManualResetEventSlim`, no
+  partial reads, writer saturation and busy timeout;
+- host boundary: Kestrel real sobre loopback/puerto dinámico, incluido request válido cercano a
+  1 MiB con muchos productos distintos y persistencia completa;
+- security/logging: envelope nativo separado de `State`, no forbidden canary appears y correlación
+  exacta de `traceId`;
+- load: SC-005 sobre Kestrel real, 25 users, exact 25/75 POST/GET mix and p95 protocol;
+- data: SC-006 mediante fixtures controlados y comprobaciones automáticas, sin participantes.
 
-Protocolo SC-006:
+`WebApplicationFactory` se configura para usar Kestrel y URL loopback con puerto dinámico en los
+tests host-boundary/load; `TestServer` no se usa para medir. Los delegates de test y primitivas
+nativas sustituyen delays arbitrarios y no requieren framework de mocks/fault injection.
 
-1. Release, loopback, host dedicado sin debugger/carga ajena.
-2. Warm-up en base descartable: dos ciclos por usuario, no medidos.
-3. Reiniciar con base limpia; crear 25 seed orders antes de medir.
+Protocolo SC-005:
+
+1. Release, Kestrel real en loopback/puerto dinámico, host dedicado sin debugger/carga ajena.
+2. Warm-up en instancia y base descartables: dos ciclos por usuario, no medidos; detener y
+   descartar ambos.
+3. Iniciar instancia nueva con base SQLite nueva; crear 25 seed orders antes de medir.
 4. Liberar 25 usuarios por barrera.
 5. Cada usuario ejecuta cinco ciclos secuenciales: POST + GET propia + dos GET de seeds.
 6. Total: 500 operaciones, 125 POST y 375 GET.
 7. Medir desde antes de `SendAsync` hasta después de leer todo el body.
 8. p95 nearest-rank: ordenar N duraciones exitosas y tomar `ceil(0.95*N)`.
 9. Reportar por separado `201`, `200`, `503`, timeouts y otros errores.
-10. Pasar sólo con p95 `< 2.000 ms`, cero `503`, cero timeouts y cero errores inesperados.
+10. Registrar como mínimo OS, CPU, storage y runtime .NET.
+11. Pasar sólo con p95 `< 2.000 ms`, cero `503`, cero timeouts y cero errores inesperados.
 
 **Rationale**: sincronizar el POST inicial de cada ciclo estresa el único writer y los GET prueban
 la capacidad de consulta/reader concurrency. El número fijo hace el resultado repetible sin
@@ -414,9 +455,9 @@ herramienta externa.
 **Alternatives considered**:
 
 - 100% writes: útil como stress, pero no representa ambas capacidades; queda en suite de
-  concurrencia, no SC-006.
+  concurrencia, no SC-005.
 - Herramienta de load externa: rechazada; 25 usuarios caben en harness .NET.
-- Incluir 400/404 en población de latencia: rechazado; SC-006 mide flujos exitosos y los errores se
+- Incluir 400/404 en población de latencia: rechazado; SC-005 mide flujos exitosos y los errores se
   reportan aparte.
 
 Sources:
@@ -426,9 +467,11 @@ Sources:
 ## 15. Automation and traceability
 
 **Decision**: `global.json`, central package versions, lock files y `scripts/verify.ps1`. El script
-ejecuta locked restore, Release build con warnings-as-errors y test categories, propagando exit code.
-La matriz bidireccional de `plan.md` relaciona grupos FR/SR/SC con diseño, model, OpenAPI y
-quickstart.
+ejecuta y detiene al primer fallo: locked restore; Release build con warnings-as-errors; tests
+unitarios; integración; contract; persistence/atomicity; restart; concurrency; Kestrel
+host-boundary; logging/security; SC-005 performance; y validación de lock files. SC-006 se verifica
+con fixtures/repositorios y artefactos controlados, no con intervención humana. La matriz
+bidireccional de `plan.md` relaciona grupos FR/SR/SC con diseño, model, OpenAPI y quickstart.
 
 **Rationale**: hace reproducibles los gates sin crear CI/proveedor ni scripts Bash.
 

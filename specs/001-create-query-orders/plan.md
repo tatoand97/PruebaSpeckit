@@ -39,8 +39,10 @@ inicio y `busy_timeout=500` ms.
 
 **Testing**: MSTest con pruebas unitarias de validación; integración/contrato contra Minimal API y
 SQLite real; atomicidad; colisiones UUID; concurrencia; clasificación de errores; seguridad de
-logs; reinicio del proceso; y carga reproducible con 25 usuarios. Comandos: `dotnet restore`,
-`dotnet build`, `dotnet test` y el futuro `scripts/verify.ps1`.
+logs; reinicio del proceso; límites de Kestrel; y carga reproducible con 25 usuarios. Las fronteras
+de persistencia/respuesta se controlan mediante delegates internos no-op accesibles sólo a
+`Orders.Api.Tests` con `InternalsVisibleTo`. Comandos: `dotnet restore`, `dotnet build`,
+`dotnet test` y el futuro `scripts/verify.ps1`.
 
 **Target Platform**: una sola instancia ASP.NET Core en loopback local o red de desarrollo aislada,
 con filesystem persistente escribible. No se admite exposición pública.
@@ -65,14 +67,18 @@ credenciales reales. No se exige TLS en loopback; cualquier otra exposición req
 auth/authz y revisión de seguridad. Kestrel limita el body. No se registran datos de órdenes ni
 detalles de almacenamiento.
 
-**Observability**: logs JSON estructurados con vocabulario y campos cerrados: operación lógica,
-status HTTP, resultado, duración en milisegundos, `traceId` y categoría segura. No se añaden backend
-de métricas ni tracing distribuido; se reconsideran con múltiples instancias, downstream services,
-SLO u operación on-call.
+**Observability**: formatter JSON console nativo, configurado con salida de una línea, timestamp UTC
+explícito y scopes deshabilitados. Su envelope nativo se distingue del `State` aplicativo, cuyo
+vocabulario cerrado contiene operación lógica, status HTTP, resultado, duración en milisegundos,
+`traceId` y categoría segura. No se añaden formatter propio, backend de métricas ni tracing
+distribuido; se reconsideran con múltiples instancias, downstream services, SLO u operación
+on-call.
 
 **Automation**: `global.json` fijará el SDK; NuGet usará lock files; Release tratará warnings como
-errores; `scripts/verify.ps1` reproducirá restore/build/tests y propagará códigos de fallo. Estos
-artefactos se crearán después, no en `/speckit-plan`.
+errores; `scripts/verify.ps1` ejecutará locked restore, Release build, validación de lock files y
+las categorías unitarias, integración, contrato, persistencia/atomicidad, restart, concurrencia,
+Kestrel host-boundary, logging/security y performance. Propagará códigos de fallo. Estos artefactos
+se crearán después, no en `/speckit-plan`.
 
 ## Constitution Check — Initial (before remediation)
 
@@ -86,7 +92,7 @@ permaneció bloqueado hasta actualizar Phase 0/Phase 1.
 | Specification First | Source of truth available | Propagar las decisiones aprobadas a spec, plan, research, model, contract y quickstart. |
 | Simplicity and Justified Architecture | Architecture remained small | Precisar límites sin agregar capas, auth, idempotencia, rate limiting ni infraestructura. |
 | .NET Engineering Standards | Baseline selected | Confirmar comportamiento nativo de JSON, Problem Details y SQLite. |
-| Testing and Quality | Scenarios existed | Hacer reproducibles SC-002 y SC-006 y cubrir fronteras de fallo. |
+| Testing and Quality | Scenarios existed | Hacer reproducibles SC-002 y SC-005 y cubrir fronteras de fallo. |
 | Security by Design | Intent existed | Definir entorno controlado, límite de body, errores y datos permitidos/prohibidos. |
 | Observability and Operability | Structured logging selected | Cerrar el contrato de eventos/campos y justificar métricas/tracing ausentes. |
 | Automation and Reproducibility | Commands proposed | Determinar fixtures, reinicios y protocolo de carga. |
@@ -304,6 +310,34 @@ No idempotency key is introduced. Retrying after a proven pre-commit `503` canno
 failed attempt, but it creates a new order if the retry succeeds. Retrying after `500`, timeout or
 disconnect with uncertain outcome can create a second order.
 
+### Minimal deterministic test seams
+
+La testabilidad de las fronteras anteriores se limita a delegates internos dentro de los archivos
+ya aprobados. No se agregan capas, Repository Pattern, Unit of Work, framework de mocks/fault
+injection, paquetes, proyectos ni delays arbitrarios.
+
+`SqliteOrderStore.cs` contiene hooks internos con delegate production-default no-op en exactamente
+estas fronteras:
+
+1. antes de `BEGIN IMMEDIATE`;
+2. después de insertar la fila `orders`;
+3. después de insertar todas las filas `order_items`;
+4. antes de commit;
+5. después de que commit retornó correctamente.
+
+Los delegates pueden bloquear con `Barrier`, `ManualResetEventSlim` u otra primitiva nativa, o
+lanzar el fallo determinado por la prueba. No cambian el flujo normal, no forman parte del contrato
+público y sólo `Orders.Api.Tests` puede configurarlos mediante `InternalsVisibleTo`; el generador
+UUID sustituible puede vivir en el mismo contenedor interno o mantenerse separado. Cada prueba
+restaura los defaults no-op al terminar para evitar estado cruzado.
+
+`Program.cs` contiene un único delegate interno adicional, también no-op por defecto, invocado
+después de recibir la confirmación de commit de `SqliteOrderStore` y antes de construir/escribir la
+respuesta HTTP. Este seam permite provocar determinísticamente un fallo post-commit y demostrar
+que la orden permanece confirmada, no hay rollback, el resultado nunca se clasifica como `503` y
+el cliente puede quedar con resultado incierto. No simula indisponibilidad mediante espera
+temporal.
+
 ### Concurrency guarantees and budgets
 
 - `SemaphoreSlim`: serializes only writers inside the single process and bounds gate wait to 1
@@ -321,7 +355,7 @@ disconnect with uncertain outcome can create a second order.
   + 500 ms margin for parse, validation, local SQL, commit and response, aiming at `< 2 s`. There is
   no separate transaction retry or application-wide server timeout: forcibly timing out a
   synchronous commit could make outcome classification dishonest. The load client uses 5 seconds
-  only as a harness fail-safe; any successful operation at or above 2 seconds already fails SC-006.
+  only as a harness fail-safe; any successful operation at or above 2 seconds already fails SC-005.
 
 ### 503 taxonomy
 
@@ -350,9 +384,19 @@ Ambiguous commit outcomes are never `503`. No `Retry-After` is emitted.
 
 ### Logging contract
 
-Every emitted application event is one JSON object. Allowed keys and value domains:
+Se usa exclusivamente el formatter JSON nativo de
+`Microsoft.Extensions.Logging.Console`; no se implementa un formatter propio. La configuración
+explícita selecciona JSON console, `JsonWriterOptions.Indented=false` para una entrada por línea,
+`UseUtcTimestamp=true`, un `TimestampFormat` UTC explícito y `IncludeScopes=false`.
 
-| Field | Type/domain |
+El objeto JSON completo pertenece al formatter. Su envelope nativo esperado puede contener
+`Timestamp`, `EventId`, `LogLevel`, `Category`, `Message` y `State`; esos nombres no son propiedades
+aplicativas ni están sujetos al catálogo cerrado de `State`. En .NET 10, `Message` normalmente
+aparece en el nivel superior y no se exige ni se espera que se duplique dentro de `State`.
+
+Dentro de `State`, el contrato cerrado de propiedades aplicativas y dominios es:
+
+| Application State property | Type/domain |
 |---|---|
 | `operation` | `startup`, `create_order`, `get_order`, `reject_missing_order_id` |
 | `httpStatus` | integer or null for startup |
@@ -360,6 +404,11 @@ Every emitted application event is one JSON object. Allowed keys and value domai
 | `durationMs` | non-negative number measured with a monotonic clock |
 | `traceId` | ASP.NET Core trace identifier; exact value copied to application Problem Details |
 | `failureCategory` | null or `validation`, `invalid_body`, `unsupported_media_type`, `writer_gate_timeout`, `sqlite_busy`, `storage_unavailable`, `startup_schema`, `uuid_collision`, `constraint`, `commit`, `rollback`, `internal` |
+
+La metadata propia del formatter, incluida `{OriginalFormat}`, puede coexistir en `State`; no cuenta
+como propiedad aplicativa. Las pruebas permiten sólo las seis propiedades aplicativas anteriores,
+verifican que no aparezca ninguna otra propiedad de aplicación y validan por separado el envelope
+nativo.
 
 Completion events use Information for `succeeded`, `rejected` and `not_found`; Warning for temporary
 unavailability, collision/rollback and disconnect; Error for startup failure or `500`. Operation,
@@ -384,17 +433,21 @@ distributed tracing is justified for a single local process without downstream s
 
 ### Performance validation protocol
 
-The normative runnable protocol is in [quickstart.md](./quickstart.md):
+The normative runnable protocol is in [quickstart.md](./quickstart.md). El harness usa
+`WebApplicationFactory` configurado para Kestrel real sobre loopback y puerto dinámico; `TestServer`
+no participa en la medición:
 
 - Release build on a dedicated local host, loopback, no debugger or unrelated workload;
-- disposable warm-up database, then a fresh measurement database seeded with 25 known orders;
+- instancia y base descartables de warm-up, ambas detenidas al terminar; luego instancia nueva y
+  base SQLite nueva de medición, seeded with 25 known orders;
 - 25 virtual users released by one barrier;
 - five measured cycles per user; each cycle is one POST followed by three GETs (25% writes/75%
   reads), for 500 operations;
 - timer starts immediately before HTTP send and stops after the full response body is read;
 - p95 uses nearest-rank `ceil(0.95 × N)` over successful measured operations only;
 - `503`, timeouts and all other errors are counted separately as failed operations;
-- pass requires p95 `< 2.000 ms`, zero `503` and zero unexpected errors.
+- the report records at least OS, CPU, storage and .NET runtime;
+- pass requires p95 `< 2.000 ms`, zero `503`, zero timeouts and zero unexpected errors.
 
 The mix exercises the writer gate at each synchronized cycle while representing the only retrieval
 capability more frequently; it does not add a list workload.
@@ -407,15 +460,14 @@ capability more frequently; it does not add a list workload.
 | FR-009–FR-014, SC-001/SC-003 | create flow, atomicity table, durability/schema, data model |
 | FR-015–FR-019, SC-003/SC-004 | capability table, query/routing boundary, response matrix |
 | FR-020, SR-003 | UUID retries, SQLite primary key, concurrency guarantees |
-| FR-021, SC-006 | 1 MiB Kestrel limit, operational budgets, load protocol |
-| SR-001–SR-007, SC-007 | controlled environment, Problem catalog, closed schemas, logging/data contract |
-| SC-005 | Quickstart usability protocol |
+| FR-021, SC-005 | 1 MiB Kestrel limit, operational budgets, real-Kestrel load protocol |
+| SR-001–SR-007, SC-006 | controlled environment, Problem catalog, native logging envelope/application State and automated data contract |
 
 ## Constitution Check — Post-design
 
 Los artefactos finales se compararon individualmente con los 40 elementos de
 `checklists/pre-tasks.md`: 40 resueltos, 0 abiertos. Se verificaron además enlaces locales,
-referencias/estructura OpenAPI, conteo de 2 paths/3 operaciones, presencia de 21 FR/7 SR/7 SC,
+referencias/estructura OpenAPI, conteo de 2 paths/3 operaciones, presencia de 21 FR/7 SR/6 SC,
 ausencia de metadatos contradictorios, ausencia de `tasks.md` y `git diff --check`.
 
 | Principle | Result | Post-design evidence |
