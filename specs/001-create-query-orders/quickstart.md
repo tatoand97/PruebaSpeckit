@@ -33,7 +33,10 @@ dotnet test .\Orders.slnx --configuration Release --no-build
 ```
 
 Resultado: lock files sin cambios, cero warnings/errores y todos los tests aprobados. El futuro
-wrapper reproduce los mismos gates y retorna exit code no cero ante fallo:
+wrapper ejecuta explícitamente locked restore, Release build con warnings-as-errors, unit,
+integration, contract, persistence/atomicity, restart, concurrency, Kestrel host-boundary,
+logging/security, SC-005 performance y validación de lock files; retorna exit code no cero ante
+fallo:
 
 ```powershell
 .\scripts\verify.ps1
@@ -210,10 +213,16 @@ dotnet test .\tests\Orders.Api.Tests\Orders.Api.Tests.csproj `
 Casos mínimos:
 
 - body válido dentro de 1.048.576 bytes alcanza la aplicación;
+- request válido cercano pero inferior a 1.048.576 bytes, con muchos `productId` distintos,
+  cantidades que no desbordan `Int64` y cero duplicados, produce `201`; una consulta y la inspección
+  SQLite comprueban que todos los productos se persistieron completos;
 - `Content-Length` mayor que 1.048.576 y stream chunked que supera el límite producen `413`;
 - `Content-Length` ausente no desactiva el límite y uno inconsistente no lo elude;
 - nunca se trunca y los conteos DB permanecen sin cambios;
 - no se asume content type/body para `413`.
+
+El caso válido grande demuestra que 1 MiB es un límite operativo de transporte, no un máximo de
+negocio para la cantidad de productos.
 
 ## Prove atomicity, UUID retries and uncertain outcome documentation
 
@@ -226,15 +235,18 @@ dotnet test .\tests\Orders.Api.Tests\Orders.Api.Tests.csproj `
 
 Cobertura requerida:
 
-1. validation failure no abre transacción;
-2. gate timeout no abre transacción y devuelve `503`;
-3. failure al abrir/BEGIN temporal y pre-commit probado devuelve `503`;
-4. order insert, cada item insert y constraint failure hacen rollback total;
-5. commit ocurre antes de construir `201`;
-6. colisiones en intentos 1 y 2 hacen rollback/retry; colisión 3 da `500` y cero orden;
-7. ningún `503` deja una orden confirmada;
-8. un fallo/desconexión simulado después de commit conserva la orden y se clasifica como resultado
-   incierto para el cliente, nunca `503`.
+1. los hooks internos no-op de `SqliteOrderStore.cs`, accesibles sólo mediante
+   `InternalsVisibleTo`, controlan before BEGIN, after order insert, after item inserts, before
+   commit y after commit sin cambiar producción;
+2. validation failure no abre transacción;
+3. gate timeout no abre transacción y devuelve `503`;
+4. failure al abrir/BEGIN temporal y pre-commit probado devuelve `503`;
+5. order insert, cada item insert y constraint failure hacen rollback total;
+6. commit ocurre antes de construir `201`;
+7. colisiones en intentos 1 y 2 hacen rollback/retry; colisión 3 da `500` y cero orden;
+8. ningún `503` deja una orden confirmada;
+9. el seam interno de `Program.cs` entre commit y respuesta provoca un fallo determinista: conserva
+   la orden, no hace rollback, nunca produce `503` y deja resultado incierto para el cliente.
 
 ## Prove durability across process/host-equivalent restart
 
@@ -262,11 +274,15 @@ dotnet test .\tests\Orders.Api.Tests\Orders.Api.Tests.csproj `
 Resultado requerido:
 
 - 25 creaciones liberadas a la vez nunca comparten ID ni dejan parciales;
-- reader antes del commit puede obtener `404`;
-- reader bloqueado hasta después del commit obtiene la orden completa;
+- `Barrier`, `ManualResetEventSlim` o equivalentes nativos controlan los hooks before/after commit,
+  sin delays arbitrarios;
+- reader pausado antes del commit puede obtener `404`;
+- reader liberado después del commit obtiene la orden completa;
 - reader nunca adquiere el writer gate;
 - writer que espera 1.000 ms recibe `503` sin transacción;
 - SQLite ocupado durante más de 500 ms produce `503` pre-commit sin retry general;
+- creación, consulta y concurrencia evidencian una conexión dedicada por operación y ningún objeto
+  ADO.NET compartido entre operaciones;
 - se documenta/acepta que `SemaphoreSlim` no garantiza FIFO;
 - SQLite, no el gate, sigue imponiendo unicidad/atomicidad ante una conexión externa accidental.
 
@@ -281,16 +297,23 @@ dotnet test .\tests\Orders.Api.Tests\Orders.Api.Tests.csproj `
 
 La prueba inyecta canarios sintéticos en customer/product/order path, body, header, connection
 string y path de DB, captura logs JSON y exige que ninguno aparezca. También comprueba que las
-categorías de ASP.NET Core, SQLite y lifetime suprimidas no emiten eventos. Cada evento de
-`Orders.Api` sólo puede contener los campos/vocabularios de `plan.md`; `traceId` debe coincidir
-exactamente con Problem Details.
+categorías de ASP.NET Core, SQLite y lifetime suprimidas no emiten eventos. El formatter JSON
+nativo se configura con una entrada por línea, UTC,
+`TimestampFormat="yyyy-MM-dd'T'HH:mm:ss.fff'Z'"` e `IncludeScopes=false`.
+La prueba valida por separado el envelope nativo esperado (`Timestamp`, `EventId`, `LogLevel`,
+`Category`, `Message`, `State`) y, dentro de `State`, sólo las seis propiedades aplicativas
+`operation`, `httpStatus`, `outcome`, `durationMs`, `traceId`, `failureCategory`, permitiendo
+metadata propia del formatter como `{OriginalFormat}`. En .NET 10 `Message` se espera normalmente
+en el nivel superior, no duplicado en `State`. No puede aparecer otra propiedad aplicativa y
+`traceId` debe coincidir exactamente con Problem Details.
 También verifica categorías para startup/schema, validation, gate timeout, busy, rollback,
 collision, commit, `503` y `500`, sin exception/SQL/path.
 
-Antes de cualquier aceptación, registrar que fixtures, DB y reportes son sintéticos. Un dataset
-externo requiere evidencia previa de clasificación no sensible; sin ella, no ejecutar.
+Los tests usan exclusivamente fixtures controlados del repositorio y marcan DB/reportes temporales
+como sintéticos. La auditoría automática falla si detecta valores/campos prohibidos o fixtures
+externos sin clasificación no sensible registrada.
 
-## Reproducible SC-006 load protocol
+## Reproducible SC-005 load protocol
 
 Ejecutar en Release, loopback, máquina dedicada, sin debugger, antivirus scan iniciado durante la
 ventana ni otras cargas controlables:
@@ -302,10 +325,13 @@ dotnet test .\tests\Orders.Api.Tests\Orders.Api.Tests.csproj `
     --filter 'TestCategory=Load'
 ```
 
-El harness debe implementar exactamente:
+El harness usa las capacidades ya disponibles de `Microsoft.AspNetCore.Mvc.Testing`: configura
+`WebApplicationFactory` para Kestrel real, loopback y puerto dinámico. `TestServer` no participa en
+la medición. Debe implementar exactamente:
 
-1. **Warm-up separado**: DB descartable, 25 usuarios, dos ciclos no medidos por usuario.
-2. **Base de medición**: reiniciar la API con DB limpia e inicializada; crear secuencialmente 25
+1. **Warm-up separado**: instancia y DB descartables, 25 usuarios, dos ciclos no medidos por
+   usuario; detener y descartar ambos.
+2. **Medición aislada**: instancia nueva y DB SQLite nueva e inicializada; crear secuencialmente 25
    seed orders antes de iniciar timers.
 3. **Concurrencia**: 25 usuarios virtuales, cada uno con cliente lógico propio.
 4. **Sincronización**: una barrera antes de cada uno de cinco ciclos para que los 25 POST compitan.
@@ -334,11 +360,10 @@ p95SuccessfulMs=<n>
 result=PASS|FAIL
 ```
 
-## Verify SC-005 usability
+## Automated SC-006 synthetic-data gate
 
-Entregar a cada participante únicamente “Create one valid order” y la primera consulta de
-“Query...”, con `$baseUri` listo y API iniciada. Medir desde la entrega hasta que muestra la orden.
-No responder preguntas durante el intento.
-
-Registrar inicio, fin, éxito/fallo y asistencia. Pasa si al menos 95% crea/consulta en menos de dos
-minutos sin ayuda. Es evidencia humana separada de tests automatizados.
+El gate inspecciona los fixtures controlados, requests generadas, archivos SQLite temporales, logs
+y reportes de la suite. Debe demostrar que usan nombres sintéticos de los namespaces de prueba, que
+no contienen credenciales ni canarios prohibidos y que no dependen de datasets externos. Cualquier
+fixture no generado requiere un registro versionado de clasificación no sensible; su ausencia hace
+fallar el gate. Toda la evidencia se obtiene automáticamente.

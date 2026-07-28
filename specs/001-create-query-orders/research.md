@@ -348,7 +348,7 @@ Reevaluar antes de exposición no controlada o incremento material de carga.
 SC-006 se evidencia automáticamente con fixtures controlados de nombres sintéticos, inspección de
 los archivos SQLite/reportes producidos por la suite y validaciones de ausencia de canarios
 prohibidos. Cualquier fixture externo requeriría un registro previo de clasificación no sensible;
-la baseline no depende de datasets externos ni de revisión por participantes humanos.
+la baseline no depende de datasets externos ni de una revisión interactiva.
 
 **Rationale**: auth y rate limiting no aportan al ejercicio si el boundary se cumple; documentar al
 responsable evita presentar la API anónima como segura fuera de él.
@@ -358,7 +358,8 @@ responsable evita presentar la API anónima como segura fuera de él.
 **Decision**: usar el formatter JSON console nativo de
 `Microsoft.Extensions.Logging.Console`, sin formatter propio. Configurarlo explícitamente como
 JSON de una entrada por línea (`JsonWriterOptions.Indented=false`), UTC
-(`UseUtcTimestamp=true`), timestamp explícito y `IncludeScopes=false`.
+(`UseUtcTimestamp=true`), `TimestampFormat="yyyy-MM-dd'T'HH:mm:ss.fff'Z'"` e
+`IncludeScopes=false`.
 
 El formatter es propietario del envelope JSON, que puede contener los campos nativos configurados
 `Timestamp`, `EventId`, `LogLevel`, `Category`, `Message` y `State`. Esos campos no forman parte del
@@ -427,7 +428,7 @@ Source: [JSON console formatter](https://learn.microsoft.com/en-us/dotnet/core/e
 - security/logging: envelope nativo separado de `State`, no forbidden canary appears y correlación
   exacta de `traceId`;
 - load: SC-005 sobre Kestrel real, 25 users, exact 25/75 POST/GET mix and p95 protocol;
-- data: SC-006 mediante fixtures controlados y comprobaciones automáticas, sin participantes.
+- data: SC-006 mediante fixtures controlados y comprobaciones automáticas.
 
 `WebApplicationFactory` se configura para usar Kestrel y URL loopback con puerto dinámico en los
 tests host-boundary/load; `TestServer` no se usa para medir. Los delegates de test y primitivas
@@ -470,7 +471,7 @@ Sources:
 ejecuta y detiene al primer fallo: locked restore; Release build con warnings-as-errors; tests
 unitarios; integración; contract; persistence/atomicity; restart; concurrency; Kestrel
 host-boundary; logging/security; SC-005 performance; y validación de lock files. SC-006 se verifica
-con fixtures/repositorios y artefactos controlados, no con intervención humana. La matriz
+con fixtures/repositorios y artefactos controlados dentro del mismo gate. La matriz
 bidireccional de `plan.md` relaciona grupos FR/SR/SC con diseño, model, OpenAPI y quickstart.
 
 **Rationale**: hace reproducibles los gates sin crear CI/proveedor ni scripts Bash.

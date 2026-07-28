@@ -387,7 +387,8 @@ Ambiguous commit outcomes are never `503`. No `Retry-After` is emitted.
 Se usa exclusivamente el formatter JSON nativo de
 `Microsoft.Extensions.Logging.Console`; no se implementa un formatter propio. La configuración
 explícita selecciona JSON console, `JsonWriterOptions.Indented=false` para una entrada por línea,
-`UseUtcTimestamp=true`, un `TimestampFormat` UTC explícito y `IncludeScopes=false`.
+`UseUtcTimestamp=true`, `TimestampFormat="yyyy-MM-dd'T'HH:mm:ss.fff'Z'"` y
+`IncludeScopes=false`.
 
 El objeto JSON completo pertenece al formatter. Su envelope nativo esperado puede contener
 `Timestamp`, `EventId`, `LogLevel`, `Category`, `Message` y `State`; esos nombres no son propiedades
@@ -468,7 +469,7 @@ capability more frequently; it does not add a list workload.
 Los artefactos finales se compararon individualmente con los 40 elementos de
 `checklists/pre-tasks.md`: 40 resueltos, 0 abiertos. Se verificaron además enlaces locales,
 referencias/estructura OpenAPI, conteo de 2 paths/3 operaciones, presencia de 21 FR/7 SR/6 SC,
-ausencia de metadatos contradictorios, ausencia de `tasks.md` y `git diff --check`.
+ausencia de metadatos contradictorios, consistencia de `tasks.md` y `git diff --check`.
 
 | Principle | Result | Post-design evidence |
 |---|---|---|
