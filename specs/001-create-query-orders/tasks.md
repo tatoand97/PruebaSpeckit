@@ -351,3 +351,8 @@ ready—not as new functionality.
 - **IDs**: T001–T037 are contiguous, unique and sequential; no renumbering was needed
 - **Format**: all 37 tasks use `- [ ] T### [P?] [US?] Description with exact path`; story labels
   appear only in user-story phases and are present on every user-story task
+
+## Phase 7: Convergence
+
+- [ ] T038 Strengthen `tests/Orders.Api.Tests/LoadTests.cs` so the SC-005 harness verifies every one of the 125 measured creations is queryable with exactly its two expected `productId`/quantity pairs and no missing or additional item, while retaining the existing unique-ID, aggregate-count, 500-operation, full-body timing and nearest-rank p95 gates per SC-005 and Plan §Performance validation protocol (partial)
+- [ ] T039 Complete the safe operational classifications in `src/Orders.Api/SqliteOrderStore.cs` and `src/Orders.Api/Program.cs` and their evidence in `tests/Orders.Api.Tests/LoggingTests.cs` so rollback, constraint/collision, commit and client-disconnect boundaries emit the required approved level/outcome/`failureCategory` through the existing native JSON envelope and six-property State without exception or order data per Plan §Logging contract and T033 (partial)
