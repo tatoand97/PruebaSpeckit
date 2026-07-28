@@ -114,7 +114,7 @@ Command ends after Phase 1 design. Report branch, IMPL_PLAN path, and generated 
    - For each dependency → best practices task
    - For each integration → patterns task
 
-2. **Generate and dispatch research agents**:
+2. **Perform focused research tasks**:
 
    ```text
    For each unknown in Technical Context:
@@ -122,6 +122,10 @@ Command ends after Phase 1 design. Report branch, IMPL_PLAN path, and generated 
    For each technology choice:
      Task: "Find best practices for {tech} in {domain}"
    ```
+
+   Process research sequentially by default. Use subagents only when the work is specialized or
+   genuinely parallelizable and their use is explicitly justified; do not assume multi-agent
+   execution from the presence of multiple research tasks.
 
 3. **Consolidate findings** in `research.md` using format:
    - Decision: [what was chosen]

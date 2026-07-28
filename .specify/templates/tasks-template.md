@@ -9,7 +9,9 @@ description: "Task list template for feature implementation"
 
 **Prerequisites**: plan.md (required), spec.md (required for user stories), research.md, data-model.md, contracts/
 
-**Tests**: The examples below include test tasks. Tests are OPTIONAL - only include them if explicitly requested in the feature specification.
+**Tests**: Include appropriate automated test tasks for all relevant business behavior. Add
+regression coverage for defect fixes when technically reasonable. TDD is not mandatory; order test
+and implementation tasks according to the strategy documented in plan.md.
 
 **Organization**: Tasks are grouped by user story to enable independent implementation and testing of each story.
 
@@ -61,7 +63,8 @@ description: "Task list template for feature implementation"
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete
 
-Examples of foundational tasks (adjust based on your project):
+Examples of foundational tasks (include only when justified by the specification and plan; do not
+create infrastructure, layers, or services merely because they appear below):
 
 - [ ] T004 Setup database schema and migrations framework
 - [ ] T005 [P] Implement authentication/authorization framework
@@ -80,19 +83,17 @@ Examples of foundational tasks (adjust based on your project):
 
 **Independent Test**: [How to verify this story works on its own]
 
-### Tests for User Story 1 (OPTIONAL - only if tests requested) ⚠️
+### Tests for User Story 1
 
-> **NOTE: Write these tests FIRST, ensure they FAIL before implementation**
-
-- [ ] T010 [P] [US1] Contract test for [endpoint] in tests/contract/test_[name].py
-- [ ] T011 [P] [US1] Integration test for [user journey] in tests/integration/test_[name].py
+- [ ] T010 [P] [US1] Add contract tests for [endpoint] in tests/contract/[Name]ContractTests.cs
+- [ ] T011 [P] [US1] Add integration tests for [user journey] in tests/integration/[Name]Tests.cs
 
 ### Implementation for User Story 1
 
-- [ ] T012 [P] [US1] Create [Entity1] model in src/models/[entity1].py
-- [ ] T013 [P] [US1] Create [Entity2] model in src/models/[entity2].py
-- [ ] T014 [US1] Implement [Service] in src/services/[service].py (depends on T012, T013)
-- [ ] T015 [US1] Implement [endpoint/feature] in src/[location]/[file].py
+- [ ] T012 [P] [US1] Create [Entity1] model in src/models/[Entity1].cs
+- [ ] T013 [P] [US1] Create [Entity2] model in src/models/[Entity2].cs
+- [ ] T014 [US1] Implement [Service] in src/services/[Service].cs (depends on T012, T013)
+- [ ] T015 [US1] Implement [endpoint/feature] in src/[location]/[File].cs
 - [ ] T016 [US1] Add validation and error handling
 - [ ] T017 [US1] Add logging for user story 1 operations
 
@@ -106,16 +107,16 @@ Examples of foundational tasks (adjust based on your project):
 
 **Independent Test**: [How to verify this story works on its own]
 
-### Tests for User Story 2 (OPTIONAL - only if tests requested) ⚠️
+### Tests for User Story 2
 
-- [ ] T018 [P] [US2] Contract test for [endpoint] in tests/contract/test_[name].py
-- [ ] T019 [P] [US2] Integration test for [user journey] in tests/integration/test_[name].py
+- [ ] T018 [P] [US2] Add contract tests for [endpoint] in tests/contract/[Name]ContractTests.cs
+- [ ] T019 [P] [US2] Add integration tests for [user journey] in tests/integration/[Name]Tests.cs
 
 ### Implementation for User Story 2
 
-- [ ] T020 [P] [US2] Create [Entity] model in src/models/[entity].py
-- [ ] T021 [US2] Implement [Service] in src/services/[service].py
-- [ ] T022 [US2] Implement [endpoint/feature] in src/[location]/[file].py
+- [ ] T020 [P] [US2] Create [Entity] model in src/models/[Entity].cs
+- [ ] T021 [US2] Implement [Service] in src/services/[Service].cs
+- [ ] T022 [US2] Implement [endpoint/feature] in src/[location]/[File].cs
 - [ ] T023 [US2] Integrate with User Story 1 components (if needed)
 
 **Checkpoint**: At this point, User Stories 1 AND 2 should both work independently
@@ -128,16 +129,16 @@ Examples of foundational tasks (adjust based on your project):
 
 **Independent Test**: [How to verify this story works on its own]
 
-### Tests for User Story 3 (OPTIONAL - only if tests requested) ⚠️
+### Tests for User Story 3
 
-- [ ] T024 [P] [US3] Contract test for [endpoint] in tests/contract/test_[name].py
-- [ ] T025 [P] [US3] Integration test for [user journey] in tests/integration/test_[name].py
+- [ ] T024 [P] [US3] Add contract tests for [endpoint] in tests/contract/[Name]ContractTests.cs
+- [ ] T025 [P] [US3] Add integration tests for [user journey] in tests/integration/[Name]Tests.cs
 
 ### Implementation for User Story 3
 
-- [ ] T026 [P] [US3] Create [Entity] model in src/models/[entity].py
-- [ ] T027 [US3] Implement [Service] in src/services/[service].py
-- [ ] T028 [US3] Implement [endpoint/feature] in src/[location]/[file].py
+- [ ] T026 [P] [US3] Create [Entity] model in src/models/[Entity].cs
+- [ ] T027 [US3] Implement [Service] in src/services/[Service].cs
+- [ ] T028 [US3] Implement [endpoint/feature] in src/[location]/[File].cs
 
 **Checkpoint**: All user stories should now be independently functional
 
@@ -154,8 +155,11 @@ Examples of foundational tasks (adjust based on your project):
 - [ ] TXXX [P] Documentation updates in docs/
 - [ ] TXXX Code cleanup and refactoring
 - [ ] TXXX Performance optimization across all stories
-- [ ] TXXX [P] Additional unit tests (if requested) in tests/unit/
-- [ ] TXXX Security hardening
+- [ ] TXXX [P] Add any remaining automated business-behavior or regression tests in tests/
+- [ ] TXXX Resolve relevant compiler and analyzer warnings
+- [ ] TXXX Validate security requirements, trust-boundary inputs, and secret handling
+- [ ] TXXX Validate structured logging and planned metrics/tracing without sensitive data
+- [ ] TXXX Run the documented build, test, and validation commands
 - [ ] TXXX Run quickstart.md validation
 
 ---
@@ -179,7 +183,7 @@ Examples of foundational tasks (adjust based on your project):
 
 ### Within Each User Story
 
-- Tests (if included) MUST be written and FAIL before implementation
+- Test and implementation order follows the strategy documented in plan.md; TDD is not mandatory
 - Models before services
 - Services before endpoints
 - Core implementation before integration
@@ -199,13 +203,13 @@ Examples of foundational tasks (adjust based on your project):
 ## Parallel Example: User Story 1
 
 ```bash
-# Launch all tests for User Story 1 together (if tests requested):
-Task: "Contract test for [endpoint] in tests/contract/test_[name].py"
-Task: "Integration test for [user journey] in tests/integration/test_[name].py"
+# Launch independent tests for User Story 1 together when parallel execution is authorized:
+Task: "Add contract tests for [endpoint] in tests/contract/[Name]ContractTests.cs"
+Task: "Add integration tests for [user journey] in tests/integration/[Name]Tests.cs"
 
 # Launch all models for User Story 1 together:
-Task: "Create [Entity1] model in src/models/[entity1].py"
-Task: "Create [Entity2] model in src/models/[entity2].py"
+Task: "Create [Entity1] model in src/models/[Entity1].cs"
+Task: "Create [Entity2] model in src/models/[Entity2].cs"
 ```
 
 ---
@@ -246,7 +250,8 @@ With multiple developers:
 - [P] tasks = different files, no dependencies
 - [Story] label maps task to specific user story for traceability
 - Each user story should be independently completable and testable
-- Verify tests fail before implementing
+- Include automated tests for relevant business behavior and regression tests when reasonable
+- Run applicable build and tests before marking the feature complete
 - Commit after each task or logical group
 - Stop at any checkpoint to validate story independently
 - Avoid: vague tasks, same file conflicts, cross-story dependencies that break independence

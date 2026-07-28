@@ -98,6 +98,18 @@
 - **FR-006**: System MUST authenticate users via [NEEDS CLARIFICATION: auth method not specified - email/password, SSO, OAuth?]
 - **FR-007**: System MUST retain user data for [NEEDS CLARIFICATION: retention period not specified]
 
+### Security and Privacy Considerations *(mandatory)*
+
+<!--
+  ACTION REQUIRED: Describe the feature's security and privacy implications without choosing
+  implementation details. Identify sensitive data, user roles, trust boundaries, and externally
+  supplied inputs. Add testable SR requirements for applicable controls. If the feature introduces
+  none, state the evaluated scope and why no additional security requirement applies.
+-->
+
+- **SR-001**: [Define an applicable security/privacy requirement or document the evaluated
+  boundary and explicit rationale when no additional control is required]
+
 ### Key Entities *(include if feature involves data)*
 
 - **[Entity 1]**: [What it represents, key attributes without implementation]

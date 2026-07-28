@@ -2,12 +2,13 @@
 
 - Use GitHub Spec Kit as the default Spec-Driven Development (SDD) workflow for this repository.
 - Follow the rules established in `.specify/memory/constitution.md`; they govern development in this repository.
-- For production features, follow this workflow: constitution → specify → clarify → plan → checklist → tasks → analyze → implement → converge.
+- For production features, use this reference workflow: constitution → specify → clarify → plan → checklist → tasks → analyze → implement → converge.
+- Use clarify, checklist, and analyze when ambiguity, complexity, or risk makes them valuable; avoid unnecessary ceremony for trivial changes.
 - Treat `spec.md` as the definition of what must be built.
 - Treat `plan.md` as the definition of how the feature will be built.
 - Treat `tasks.md` as the executable work breakdown.
 - Never change a specification silently to make it match the implementation. Surface inconsistencies and resolve them explicitly.
-- Before implementing a feature, ensure that its specification, plan, and task breakdown are sufficient, unless the user explicitly requests a direct change.
+- Before implementing a production feature, ensure that its specification, plan, and task breakdown are sufficient. Direct changes may skip phases only when they are trivial and do not redefine production behavior.
 - Use .NET 10 as the primary development stack.
 - Prefer PowerShell for repository-owned automation scripts.
 - Use the available Agent Skills only when they are relevant to the current task.

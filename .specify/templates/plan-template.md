@@ -18,13 +18,13 @@
   the iteration process.
 -->
 
-**Language/Version**: [e.g., Python 3.11, Swift 5.9, Rust 1.75 or NEEDS CLARIFICATION]
+**Language/Version**: [.NET 10 and C# by default, or justified alternative with version]
 
-**Primary Dependencies**: [e.g., FastAPI, UIKit, LLVM or NEEDS CLARIFICATION]
+**Primary Dependencies**: [native .NET capabilities first; list external packages and why each is needed]
 
 **Storage**: [if applicable, e.g., PostgreSQL, CoreData, files or N/A]
 
-**Testing**: [e.g., pytest, XCTest, cargo test or NEEDS CLARIFICATION]
+**Testing**: [test types, framework, business-behavior coverage, regression needs, and commands]
 
 **Target Platform**: [e.g., Linux server, iOS 15+, WASM or NEEDS CLARIFICATION]
 
@@ -36,11 +36,37 @@
 
 **Scale/Scope**: [domain-specific, e.g., 10k users, 1M LOC, 50 screens or NEEDS CLARIFICATION]
 
+**Security**: [trust boundaries, input validation, secrets, least privilege, auth/authz,
+encryption, and information exposure decisions as applicable]
+
+**Observability**: [structured logs, metrics, and tracing needed for diagnosis, or explicit
+rationale for items that do not apply]
+
+**Automation**: [reproducible PowerShell-preferred build, test, and validation commands]
+
 ## Constitution Check
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-[Gates determined based on constitution file]
+- **Specification First**: `spec.md` is sufficient, remains the source of truth, and any known
+  SDD artifact changes are identified.
+- **Simplicity and Architecture**: The design is the simplest viable solution. Every added
+  abstraction, layer, service, pattern, and dependency maps to a concrete requirement, risk, or
+  constraint.
+- **.NET Standards**: .NET 10 is used unless an alternative is explicitly justified. Dependencies
+  are supported, native .NET capabilities were considered first, nullable reference types remain
+  enabled, and relevant compiler/analyzer warnings have a resolution plan.
+- **Testing and Quality**: The plan defines automated tests for relevant business behavior,
+  regression coverage where applicable, and runnable build/test gates without imposing TDD.
+- **Security by Design**: Security and privacy implications are identified; trust-boundary input
+  validation, secret handling, least privilege, and applicable auth/authz/encryption/data-exposure
+  decisions are explicit.
+- **Observability and Operability**: Production diagnostic needs for structured logs, metrics, and
+  tracing are defined proportionally without selecting an unjustified platform.
+- **Automation and Reproducibility**: Build, test, and primary validation commands are documented;
+  repository-owned automation prefers PowerShell and has explicit failure behavior.
+- **AI-Assisted Development**: The execution plan does not assume multi-agent or parallel AI work;
+  any proposed subagent use is specialized or genuinely parallelizable and explicitly justified.
 
 ## Project Structure
 

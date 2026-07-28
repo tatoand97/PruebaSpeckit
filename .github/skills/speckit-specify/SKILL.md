@@ -162,6 +162,7 @@ Given that feature description, do this:
 
       - [ ] No [NEEDS CLARIFICATION] markers remain
       - [ ] Requirements are testable and unambiguous
+      - [ ] Security and privacy implications are explicitly documented or justified as not applicable
       - [ ] Success criteria are measurable
       - [ ] Success criteria are technology-agnostic (no implementation details)
       - [ ] All acceptance scenarios are defined
