@@ -146,11 +146,18 @@ Validation precedes any transaction. An insert/constraint failure rolls back the
 
 There is no persisted “Creating” state. Observable storage has only:
 
-- **Absent**: before commit, after rollback, gate timeout, proven pre-commit `503`, or three UUID
-  collisions.
-- **Confirmed**: commit returned successfully; complete order is queryable afterward.
-- **Client-uncertain**: commit may have completed but response failed/was lost. Storage is still
-  either Absent or Confirmed; uncertainty belongs to the client observation, not a database state.
+- **Absent / known pre-commit**: before `CommitInvoker` begins, after safe rollback, gate timeout,
+  proven pre-commit `503`, or three UUID collisions.
+- **Confirmed**: SQLite commit completed and the complete order is queryable. This includes the
+  injected case where the real commit completed but `CommitInvoker` threw before returning to the
+  store, even though the store cannot classify that outcome as confirmed without later inspection.
+- **Application/client-uncertain**: `CommitInvoker` began but did not return normally, or commit was
+  confirmed but the response path failed. Storage is still either Absent or Confirmed; this is an
+  observation state, not a third database state. No rollback or compensation may presume Absent
+  after commit invocation has begun.
+
+If `CommitInvoker` returns successfully, failures in the after-commit store hook or the
+post-commit/pre-response Program hook cannot change Confirmed storage and are never `503`.
 
 No idempotency key or content uniqueness exists. Retrying a client-uncertain request can create a
 second confirmed order.

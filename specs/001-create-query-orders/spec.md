@@ -149,6 +149,11 @@ Un cliente recibe una explicación clara cuando intenta crear una orden inválid
 - **FR-011**: El identificador asignado MUST devolverse como parte de la confirmación de creación.
 - **FR-012**: Toda orden nueva MUST comenzar en estado `Pending`.
 - **FR-013**: La confirmación de creación MUST permitir conocer el identificador asignado y el estado inicial de la orden.
+
+**Nota de trazabilidad FR-011/FR-013**: la superposición es deliberada. FR-011 conserva la
+obligación independiente de devolver el identificador asignado; FR-013 define la forma mínima de la
+confirmación y exige conjuntamente `orderId` y el estado inicial. FR-013 no reemplaza FR-011.
+
 - **FR-014**: Una orden confirmada MUST quedar disponible para consultas posteriores y sobrevivir
   reinicios del proceso y del host mientras se conserve el almacenamiento SQLite persistente.
   Recrear el entorno o eliminar, reemplazar o perder ese almacenamiento queda fuera de la garantía.

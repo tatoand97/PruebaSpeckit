@@ -42,6 +42,12 @@ fallo:
 .\scripts\verify.ps1
 ```
 
+`tests/Orders.Api.Tests/Orders.Api.Tests.csproj` debe contener
+`<MSTestParallelizeScope>None</MSTestParallelizeScope>` y no debe declarar
+`[assembly: Parallelize]` ni una política contradictoria. El assembly se ejecuta secuencialmente;
+los 25 trabajos de T030 se liberan concurrentemente dentro de un único test. Esta política MSTest
+es independiente de las marcas `[P]` de `tasks.md`.
+
 ## Start with persistent local storage
 
 En una terminal:
@@ -213,16 +219,18 @@ dotnet test .\tests\Orders.Api.Tests\Orders.Api.Tests.csproj `
 Casos mínimos:
 
 - body válido dentro de 1.048.576 bytes alcanza la aplicación;
-- request válido cercano pero inferior a 1.048.576 bytes, con muchos `productId` distintos,
-  cantidades que no desbordan `Int64` y cero duplicados, produce `201`; una consulta y la inspección
-  SQLite comprueban que todos los productos se persistieron completos;
+- el caso válido grande serializa primero el JSON final, mide su longitud UTF-8 y falla salvo que
+  sea exactamente **1.040.000 bytes**; usa muchos `productId` ASCII distintos, cantidades válidas,
+  cero duplicados y padding calculado determinísticamente para alcanzar el objetivo;
+- ese request de 1.040.000 bytes produce `201`; una consulta y la inspección SQLite comprueban que
+  todos los productos se persistieron completos;
 - `Content-Length` mayor que 1.048.576 y stream chunked que supera el límite producen `413`;
 - `Content-Length` ausente no desactiva el límite y uno inconsistente no lo elude;
 - nunca se trunca y los conteos DB permanecen sin cambios;
 - no se asume content type/body para `413`.
 
-El caso válido grande demuestra que 1 MiB es un límite operativo de transporte, no un máximo de
-negocio para la cantidad de productos.
+Los casos `413` se construyen aparte con más de 1.048.576 bytes. El objetivo de 1.040.000 bytes no
+es un máximo de negocio: demuestra que 1 MiB es un límite operativo de transporte.
 
 ## Prove atomicity, UUID retries and uncertain outcome documentation
 
@@ -233,20 +241,33 @@ dotnet test .\tests\Orders.Api.Tests\Orders.Api.Tests.csproj `
     --filter 'TestCategory=Atomicity|TestCategory=Identity'
 ```
 
-Cobertura requerida:
+Cobertura requerida de seams:
 
-1. los hooks internos no-op de `SqliteOrderStore.cs`, accesibles sólo mediante
-   `InternalsVisibleTo`, controlan before BEGIN, after order insert, after item inserts, before
-   commit y after commit sin cambiar producción;
-2. validation failure no abre transacción;
-3. gate timeout no abre transacción y devuelve `503`;
-4. failure al abrir/BEGIN temporal y pre-commit probado devuelve `503`;
-5. order insert, cada item insert y constraint failure hacen rollback total;
-6. commit ocurre antes de construir `201`;
-7. colisiones en intentos 1 y 2 hacen rollback/retry; colisión 3 da `500` y cero orden;
-8. ningún `503` deja una orden confirmada;
-9. el seam interno de `Program.cs` entre commit y respuesta provoca un fallo determinista: conserva
-   la orden, no hace rollback, nunca produce `503` y deja resultado incierto para el cliente.
+1. before BEGIN failure;
+2. after order insert failure con rollback total;
+3. after items failure con rollback total;
+4. before commit failure: `CommitInvoker` nunca es invocado, rollback es seguro y no hay orden
+   confirmada;
+5. commit invocation with uncertain outcome: el `CommitInvoker` sustituido ejecuta el commit real y
+   después lanza antes de retornar; el store no compensa, nunca responde `503`, usa `500` genérico si
+   puede responder y la inspección SQLite posterior comprueba que el commit ocurrió;
+6. confirmed after-commit failure: `CommitInvoker` retornó, falla el hook after-commit y la orden
+   sigue confirmada sin rollback ni `503`;
+7. post-commit/pre-response failure en el seam de `Program.cs`, conservando la orden confirmada sin
+   rollback ni `503`;
+8. reader snapshot before commit, que puede devolver `404` sin observar parciales;
+9. reader after commit, que obtiene la orden completa.
+
+Además, validation failure no abre transacción; gate timeout y open/BEGIN temporal probado devuelven
+`503` sin commit; colisiones 1/2 hacen rollback/retry y la tercera da `500` con cero orden; ningún
+`503` deja una orden confirmada.
+
+Todos los delegates pertenecen a una única instancia interna de seams por host, compartida por
+`SqliteOrderStore` y `Program.cs`, nunca a estado mutable `static`. Cada
+`WebApplicationFactory` usa su propia instancia. Toda prueba conserva el valor anterior de cada
+delegate modificado y lo restaura en `finally`; usa SQLite temporal propio cuando toca
+persistencia/concurrencia y dispone obligatoriamente la factory y el storage temporal. No se usan
+delays arbitrarios, paquetes, capas ni frameworks adicionales.
 
 ## Prove durability across process/host-equivalent restart
 

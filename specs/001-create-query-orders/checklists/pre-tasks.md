@@ -102,7 +102,7 @@
 - [x] CHK039 ¿Se resolvieron las contradicciones de metadatos y conteo entre la rama `main` declarada en `spec.md`, la rama `001-create-query-orders` declarada en `plan.md`, las “dos operaciones” del plan y las tres operaciones HTTP descritas por research/OpenAPI? [Consistency, Conflict, Spec §Feature Branch, Plan §Branch/Scale-Scope, Research §2, OpenAPI §paths]
   - **Resuelto**: `spec.md`, `plan.md`, `research.md` y quickstart declaran rama activa `main`; `001-create-query-orders` sólo es Feature ID; todos cuentan dos capacidades/tres operaciones.
 - [x] CHK040 ¿Las afirmaciones “sin gaps”, “sin clarificaciones pendientes” y gate constitucional `PASS` están sustentadas tras resolver los gaps y conflictos de contrato, límites, concurrencia, rendimiento, seguridad, observabilidad y trazabilidad señalados por este checklist? [Consistency, Conflict, Plan §Constitution Check/Specification Gaps and Clarifications, Research §Research conclusion]
-  - **Resuelto**: revisión final confirmó 40/40 con evidencia, enlaces/referencias válidos, 2 paths/3 operaciones, 21 FR/7 SR/7 SC, cero contradicciones buscadas, `git diff --check` limpio y `tasks.md` ausente; `plan.md` registra el gate `PASS`.
+  - **Resuelto**: revisión final confirmó 40/40 con evidencia, enlaces/referencias válidos, 2 paths/3 operaciones, 21 FR/7 SR/6 SC (34 requirements), cero contradicciones buscadas, `git diff --check` limpio y el inventario T001–T037 presente en `tasks.md`; `plan.md` registra el gate `PASS`.
 
 ## Notes
 

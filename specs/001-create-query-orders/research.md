@@ -168,17 +168,37 @@ No se usa el cancellation token del cliente para interrumpir una transacción de
 la operación termina en commit o rollback para conservar una frontera determinista. Cualquier
 fallo pre-commit revierte. `201` sólo se intenta después del retorno exitoso de commit.
 
-`503` se usa únicamente cuando se sabe que no hubo commit. Si commit arroja y no puede demostrarse
-su resultado, se clasifica `500`/desconexión, nunca `503`. Si commit terminó y la respuesta se pierde,
-la orden puede existir aunque el cliente no conozca el resultado. Un retry puede crear otra orden.
+`503` se usa únicamente cuando se sabe que no hubo commit. Se distinguen tres fronteras:
 
-**Minimal testability mechanism**: `SqliteOrderStore.cs` conserva delegates internos, no-op por
-default, inmediatamente antes de `BEGIN`, después del insert de `orders`, después de todos los
-inserts de items, antes de commit y después de commit. `Program.cs` conserva un único delegate
-interno después de commit y antes de construir/escribir la respuesta. `InternalsVisibleTo` da
-acceso sólo a `Orders.Api.Tests`. Las pruebas pueden hacer que esos delegates bloqueen con
-`Barrier`/`ManualResetEventSlim` o lancen un fallo determinista; producción no los configura. El
-generador UUID sustituible puede integrarse en el mismo mecanismo o permanecer separado.
+1. **Known pre-commit failure**: el hook before-commit lanza antes de invocar `CommitInvoker`;
+   commit nunca comenzó, rollback es seguro y no existe orden confirmada.
+2. **Uncertain commit outcome**: `CommitInvoker` comenzó pero no retornó normalmente; nunca se
+   clasifica `503` ni se ejecuta compensación que presuponga que commit no ocurrió. Si aún puede
+   escribirse, la respuesta es `500` genérico.
+3. **Known committed/post-commit failure**: `CommitInvoker` retornó correctamente y después falla
+   el hook after-commit o la frontera post-commit/pre-response de `Program.cs`; la orden está
+   confirmada, no hay rollback y nunca se clasifica `503`.
+
+Si la respuesta se pierde, la orden puede existir aunque el cliente no conozca el resultado. Un
+retry puede crear otra orden.
+
+**Minimal testability mechanism**: un objeto interno por host, conceptualmente `OrderTestSeams`,
+contiene los delegates no-op inmediatamente antes de `BEGIN`, después del insert de `orders`,
+después de todos los inserts de items, antes de commit y después de commit; el generador UUID
+sustituible; el seam de `Program.cs` posterior al commit y anterior a la respuesta; y
+`CommitInvoker`. El default funcional de este último es
+`transaction => transaction.Commit()`. La prueba de outcome incierto lo sustituye por un delegate
+que ejecuta el commit real y lanza antes de retornar normalmente; una inspección SQLite posterior
+confirma el commit real sin permitir que el store lo presuponga.
+
+Producción registra exactamente una instancia con defaults por host. Cada `WebApplicationFactory`
+la reemplaza, si lo necesita, por una instancia exclusiva; `SqliteOrderStore` y `Program.cs`
+reciben esa misma instancia. Puede ser singleton dentro del host, pero nunca estado mutable
+`static`/global del proceso. `InternalsVisibleTo` da acceso sólo a `Orders.Api.Tests`. Toda prueba
+que cambie un delegate conserva el valor anterior y lo restaura en `finally`; cada prueba de
+persistencia/concurrencia usa SQLite temporal propio y dispone factory y storage como cleanup. Las
+pruebas pueden bloquear con `Barrier`/`ManualResetEventSlim` o lanzar un fallo determinista, sin
+delays arbitrarios.
 
 **Rationale**: la transacción evita estados parciales; no hay compensación ni recurso distribuido.
 La ausencia deliberada de idempotencia hace necesario documentar, no ocultar, el resultado incierto.
@@ -237,7 +257,7 @@ Sources:
 
 ## 8. Semantic validation and duplicate reporting
 
-**Decision**: validación manual, determinista y acumulativa después de deserialización:
+**Decision**: validación aplicativa explícita, determinista y acumulativa después de deserialización:
 
 1. `customerId` utilizable;
 2. `items` presente/no vacío;
@@ -271,6 +291,13 @@ de ejecutar el endpoint y un stream sin longitud se rechaza al superar el límit
 superior permite rechazo temprano; si falta se cuentan bytes reales, y si es engañoso/inconsistente
 la solicitud es un error de protocolo del host y no puede eludir el límite. Como el rechazo puede
 producirse antes del pipeline de la app, no se garantiza body, media type ni Problem Details.
+
+El caso válido grande fija como objetivo exactamente **1.040.000 bytes** del JSON finalmente
+serializado en UTF-8. El fixture genera determinísticamente muchos `productId` ASCII distintos,
+cantidades válidas y padding calculado sin duplicados; mide los bytes finales antes de enviar y
+falla si el total no es exactamente 1.040.000. Debe producir `201` y persistir todos los productos.
+Los casos que exceden 1.048.576 bytes permanecen separados y esperan `413`; 1.040.000 no es un
+máximo de negocio.
 
 **Rationale**: es la protección más simple y nativa frente a bodies desproporcionados; no introduce
 un máximo de productos ni cantidad.
@@ -413,26 +440,37 @@ Source: [JSON console formatter](https://learn.microsoft.com/en-us/dotnet/core/e
 
 ## 14. Testing and reproducible performance
 
-**Decision**: MSTest + `WebApplicationFactory`, SQLite real y fixtures temporales. Cobertura:
+**Decision**: MSTest + `WebApplicationFactory`, SQLite real y fixtures temporales. El proyecto
+`tests/Orders.Api.Tests/Orders.Api.Tests.csproj` declara
+`<MSTestParallelizeScope>None</MSTestParallelizeScope>` y no usa simultáneamente
+`[assembly: Parallelize]` ni otra configuración contradictoria. Todo el assembly se ejecuta
+secuencialmente para aislar SQLite, hosts, fault injection, logging, Kestrel y concurrencia. T030
+genera sus 25 operaciones concurrentes internamente dentro de un único test, de modo que esta
+política no reduce la cobertura de concurrencia. `[P]` en `tasks.md` sólo expresa ejecución posible
+entre tareas y no guarda relación con MSTest. Cobertura:
 
 - unit: parsing-policy-adjacent DTO cases y todas las reglas semánticas acumulables;
 - contract: auditoría diferencial de tres operaciones, statuses, headers, media types, schemas
   cerrados y catálogo contra `contracts/openapi.yaml`;
 - integration: schema/pragmas, create/read, restart with same file, startup failures;
-- atomicity: cada frontera pre-commit y rollback sin parciales mediante los delegates internos;
+- atomicity: before BEGIN, after order insert, after items y before commit con rollback sin
+  parciales; `CommitInvoker` real-commit-then-throw para outcome incierto; after-commit confirmado y
+  post-commit/pre-response sin rollback;
 - identity: collision attempts 1/2/3 con generador sustituible sólo en tests;
 - concurrency: reads before/after commit sincronizadas con `Barrier`/`ManualResetEventSlim`, no
   partial reads, writer saturation and busy timeout;
-- host boundary: Kestrel real sobre loopback/puerto dinámico, incluido request válido cercano a
-  1 MiB con muchos productos distintos y persistencia completa;
+- host boundary: Kestrel real sobre loopback/puerto dinámico, incluido request válido de exactamente
+  1.040.000 bytes UTF-8 con muchos productos distintos y persistencia completa;
 - security/logging: envelope nativo separado de `State`, no forbidden canary appears y correlación
   exacta de `traceId`;
 - load: SC-005 sobre Kestrel real, 25 users, exact 25/75 POST/GET mix and p95 protocol;
 - data: SC-006 mediante fixtures controlados y comprobaciones automáticas.
 
 `WebApplicationFactory` se configura para usar Kestrel y URL loopback con puerto dinámico en los
-tests host-boundary/load; `TestServer` no se usa para medir. Los delegates de test y primitivas
-nativas sustituyen delays arbitrarios y no requieren framework de mocks/fault injection.
+tests host-boundary/load; `TestServer` no se usa para medir. Cada factory posee su instancia de
+seams y cada prueba de persistencia/concurrencia su SQLite temporal; el cleanup dispone ambos y
+restaura delegates en `finally`. Los delegates de test y primitivas nativas sustituyen delays
+arbitrarios y no requieren framework de mocks/fault injection.
 
 Protocolo SC-005:
 
@@ -486,4 +524,4 @@ bidireccional de `plan.md` relaciona grupos FR/SR/SC con diseño, model, OpenAPI
 Las decisiones materiales están resueltas sin añadir negocio, autenticación, idempotencia, rate
 limiting, escalado horizontal ni observabilidad externa. La revisión post-design encontró evidencia
 para los 40 checks y cero contradicciones o clarificaciones técnicas pendientes; el resultado
-coincide con `plan.md`: `READY FOR TASKS`.
+coincide con `plan.md`: `READY FOR FINAL RE-ANALYZE`.

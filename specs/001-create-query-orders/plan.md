@@ -39,10 +39,16 @@ inicio y `busy_timeout=500` ms.
 
 **Testing**: MSTest con pruebas unitarias de validación; integración/contrato contra Minimal API y
 SQLite real; atomicidad; colisiones UUID; concurrencia; clasificación de errores; seguridad de
-logs; reinicio del proceso; límites de Kestrel; y carga reproducible con 25 usuarios. Las fronteras
-de persistencia/respuesta se controlan mediante delegates internos no-op accesibles sólo a
-`Orders.Api.Tests` con `InternalsVisibleTo`. Comandos: `dotnet restore`, `dotnet build`,
-`dotnet test` y el futuro `scripts/verify.ps1`.
+logs; reinicio del proceso; límites de Kestrel; y carga reproducible con 25 usuarios. El assembly de
+tests declara ejecución secuencial mediante
+`<MSTestParallelizeScope>None</MSTestParallelizeScope>` en
+`tests/Orders.Api.Tests/Orders.Api.Tests.csproj`; no usa `[assembly: Parallelize]` ni otra política
+contradictoria. T030 y las demás pruebas de concurrencia generan concurrencia dentro de un único
+test, por lo que la política del assembly no reduce la prueba de 25 operaciones simultáneas. `[P]`
+en `tasks.md` describe oportunidades de ejecución entre tareas y no la ejecución paralela de
+MSTest. Las fronteras de persistencia/respuesta se controlan mediante delegates internos por host
+accesibles sólo a `Orders.Api.Tests` con `InternalsVisibleTo`. Comandos: `dotnet restore`,
+`dotnet build`, `dotnet test` y el futuro `scripts/verify.ps1`.
 
 **Target Platform**: una sola instancia ASP.NET Core en loopback local o red de desarrollo aislada,
 con filesystem persistente escribible. No se admite exposición pública.
@@ -116,7 +122,8 @@ specs/001-create-query-orders/
     └── pre-tasks.md
 ```
 
-No se crea `tasks.md`; corresponde exclusivamente a `/speckit-tasks`.
+`tasks.md` conserva el inventario aprobado T001–T037 y forma parte de los artefactos SDD; este plan
+no ejecuta ni implementa esas tareas.
 
 ### Proposed source code (repository root)
 
@@ -302,9 +309,11 @@ con el campo del evento operacional seguro.
 | Order/item insert or constraint failure | Rollback entire attempt | Collision may retry; otherwise generic `500` |
 | UUID collision attempts 1–2 | Rollback, generate new UUID | No response yet |
 | UUID collision attempt 3 | Rollback, no confirmed order | Generic `500` |
-| Commit succeeds | Complete order visible | Application may attempt `201` |
-| Commit throws or its outcome cannot be proved | Never classify as `503`; outcome is uncertain | Generic `500` if writable, otherwise disconnect |
-| HTTP connection/serialization fails after commit | Confirmed order may exist; no rollback | Client has uncertain outcome |
+| Before-commit hook fails before invoking `CommitInvoker` | Known pre-commit failure: commit was never invoked; rollback is safe and no order is confirmed | Generic `500` unless the concrete failure belongs to the proven temporary `503` taxonomy |
+| `CommitInvoker` starts but does not return normally | Commit outcome is uncertain; storage may be absent or fully committed, and no rollback/compensation may presume that commit did not occur | Never `503`; generic `500` if writable, otherwise disconnect |
+| `CommitInvoker` returns successfully | Complete order is confirmed and visible | Application may attempt `201` |
+| Confirmed after-commit hook fails | Complete order remains confirmed; rollback is forbidden | Never `503`; generic `500` if writable, otherwise disconnect |
+| Program post-commit/pre-response hook or HTTP write fails | Complete order remains confirmed; no rollback | Never `503`; generic `500` if writable, otherwise disconnect/client-uncertain |
 
 No idempotency key is introduced. Retrying after a proven pre-commit `503` cannot duplicate that
 failed attempt, but it creates a new order if the retry succeeds. Retrying after `500`, timeout or
@@ -316,8 +325,14 @@ La testabilidad de las fronteras anteriores se limita a delegates internos dentr
 ya aprobados. No se agregan capas, Repository Pattern, Unit of Work, framework de mocks/fault
 injection, paquetes, proyectos ni delays arbitrarios.
 
-`SqliteOrderStore.cs` contiene hooks internos con delegate production-default no-op en exactamente
-estas fronteras:
+Un objeto interno conceptualmente denominado `OrderTestSeams` agrupa los delegates sin exigir un
+archivo nuevo. Cada host de aplicación posee exactamente una instancia: producción la registra con
+lifetime singleton **dentro de ese host**, con defaults funcionales/no-op; no existe estado mutable
+`static` ni singleton global de proceso. Cada `WebApplicationFactory` puede reemplazar el registro
+por una instancia exclusiva de esa factory. `SqliteOrderStore` y `Program.cs` reciben por DI la misma
+instancia correspondiente al host.
+
+`SqliteOrderStore.cs` consume hooks internos production-default no-op en estas fronteras:
 
 1. antes de `BEGIN IMMEDIATE`;
 2. después de insertar la fila `orders`;
@@ -325,18 +340,37 @@ estas fronteras:
 4. antes de commit;
 5. después de que commit retornó correctamente.
 
+El mismo objeto contiene `CommitInvoker`, dedicado exclusivamente a invocar commit. Su default de
+producción es funcionalmente `transaction => transaction.Commit()`. El hook before-commit puede
+lanzar antes de invocarlo, lo que prueba un fallo pre-commit conocido. Para probar outcome incierto,
+una factory reemplaza `CommitInvoker` por un delegate que ejecuta primero el commit real y luego
+lanza antes de devolver control normalmente al store: la invocación comenzó, el store no recibió
+confirmación de retorno, no ejecuta compensación que presuponga ausencia de commit y nunca clasifica
+el fallo como `503`. SQLite puede inspeccionarse después para probar que, en ese escenario inyectado,
+el commit sí ocurrió. El hook after-commit sólo se alcanza cuando `CommitInvoker` retornó
+correctamente y por tanto representa una orden confirmada.
+
 Los delegates pueden bloquear con `Barrier`, `ManualResetEventSlim` u otra primitiva nativa, o
 lanzar el fallo determinado por la prueba. No cambian el flujo normal, no forman parte del contrato
 público y sólo `Orders.Api.Tests` puede configurarlos mediante `InternalsVisibleTo`; el generador
-UUID sustituible puede vivir en el mismo contenedor interno o mantenerse separado. Cada prueba
-restaura los defaults no-op al terminar para evitar estado cruzado.
+UUID sustituible puede vivir en el mismo objeto. Cada prueba que cambie un delegate conserva su
+valor anterior, lo configura dentro de su scope y lo restaura obligatoriamente en `finally`. Cada
+prueba de persistencia/concurrencia usa su propio SQLite temporal y el cleanup dispone tanto la
+`WebApplicationFactory` como el storage temporal. Al terminar, los hooks de la instancia quedan otra
+vez en defaults no-op/funcionales; ninguna factory comparte seams mutables con otra.
 
-`Program.cs` contiene un único delegate interno adicional, también no-op por defecto, invocado
-después de recibir la confirmación de commit de `SqliteOrderStore` y antes de construir/escribir la
-respuesta HTTP. Este seam permite provocar determinísticamente un fallo post-commit y demostrar
-que la orden permanece confirmada, no hay rollback, el resultado nunca se clasifica como `503` y
-el cliente puede quedar con resultado incierto. No simula indisponibilidad mediante espera
-temporal.
+`Program.cs` consume de esa misma instancia por host un delegate adicional, no-op por defecto,
+invocado después de recibir la confirmación de commit de `SqliteOrderStore` y antes de
+construir/escribir la respuesta HTTP. Este seam permite provocar determinísticamente un fallo
+post-commit/pre-response y demostrar que la orden permanece confirmada, no hay rollback, el
+resultado nunca se clasifica como `503` y el cliente puede quedar con resultado incierto. No simula
+indisponibilidad mediante espera temporal.
+
+Con este único objeto por host pueden reproducirse sin delays arbitrarios ni estado mutable
+`static`: fallo before BEGIN; fallo after order insert; fallo after items; fallo before commit;
+invocación de commit con outcome incierto mediante `CommitInvoker`; fallo after-commit ya
+confirmado; fallo post-commit/pre-response; snapshot lector anterior al commit; y lectura posterior
+al commit.
 
 ### Concurrency guarantees and budgets
 
@@ -493,4 +527,4 @@ No existe violación constitucional ni complejidad excepcional que requiera just
 - **Specification gaps**: ninguno después de la remediación y revisión de los 40 checks.
 - **Pending clarifications**: ninguna.
 - **Remaining contradictions**: ninguna detectada.
-- **Readiness**: `READY FOR TASKS`.
+- **Readiness**: `READY FOR FINAL RE-ANALYZE`.
