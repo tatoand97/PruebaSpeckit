@@ -3,6 +3,10 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Orders.Api;
 
 namespace Orders.Api.Tests;
@@ -18,9 +22,11 @@ public sealed partial class LoggingTests
         const string customerCanary = "security-synthetic-customer-canary";
         const string productCanary = "security-synthetic-product-canary";
         const string routeCanary = "security-synthetic-route-canary";
+        const string queryCanary = "security-synthetic-query-canary";
         const string headerCanary = "security-synthetic-header-canary";
         const string exceptionCanary = "security-synthetic-exception-canary";
         const string databasePathCanary = "security-synthetic-db-path-canary";
+        const string disconnectTraceId = "logging-client-disconnect-trace";
         var directory = Path.Combine(
             Path.GetTempPath(),
             "Orders.Api.Tests",
@@ -29,12 +35,17 @@ public sealed partial class LoggingTests
         Directory.CreateDirectory(directory);
         var databasePath = Path.Combine(directory, "orders.db");
         var seams = new OrderTestSeams();
+        var previousUuidFactory = seams.UuidFactory;
         var previousBeforeBegin = seams.BeforeBegin;
+        var previousAfterOrderInsert = seams.AfterOrderInsert;
         var previousBeforeCommit = seams.BeforeCommit;
+        var previousCommitInvoker = seams.CommitInvoker;
+        var previousPostCommitPreResponse = seams.PostCommitPreResponse;
         var originalOut = Console.Out;
         var buffer = new StringWriter(CultureInfo.InvariantCulture);
         var synchronizedWriter = TextWriter.Synchronized(buffer);
-        string validationTraceId;
+        var problemTraceIds = new Dictionary<string, string>(StringComparer.Ordinal);
+        var connectionString = string.Empty;
         try
         {
             Console.SetOut(synchronizedWriter);
@@ -66,27 +77,81 @@ public sealed partial class LoggingTests
                     "/orders",
                     new { customerId = " ", items = Array.Empty<object>() });
                 Assert.AreEqual(HttpStatusCode.BadRequest, invalid.StatusCode);
-                using (var invalidBody = JsonDocument.Parse(await invalid.Content.ReadAsStringAsync()))
-                {
-                    validationTraceId =
-                        invalidBody.RootElement.GetProperty("traceId").GetString()
-                        ?? throw new AssertFailedException("Problem Details traceId is required.");
-                }
+                problemTraceIds["validation"] = await ReadProblemTraceId(invalid);
 
-                using var notFound = await client.GetAsync($"/orders/{routeCanary}");
+                using var notFound = await client.GetAsync($"/orders/{routeCanary}?probe={queryCanary}");
                 Assert.AreEqual(HttpStatusCode.NotFound, notFound.StatusCode);
 
                 seams.BeforeBegin =
                     _ => throw new OrderTemporarilyUnavailableException("storage_unavailable");
                 using var unavailable = await AtomicityTests.PostValid(client, "logging-unavailable");
                 Assert.AreEqual(HttpStatusCode.ServiceUnavailable, unavailable.StatusCode);
+                problemTraceIds["storage_unavailable"] = await ReadProblemTraceId(unavailable);
                 seams.BeforeBegin = previousBeforeBegin;
 
-                seams.BeforeCommit = (_, _) => throw new InvalidOperationException(exceptionCanary);
-                using var failed = await AtomicityTests.PostValid(client, "logging-failure");
-                Assert.AreEqual(HttpStatusCode.InternalServerError, failed.StatusCode);
+                seams.UuidFactory = () => Guid.Parse(orderId);
+                using var collision = await AtomicityTests.PostValid(client, "logging-collision");
+                Assert.AreEqual(HttpStatusCode.InternalServerError, collision.StatusCode);
+                problemTraceIds["uuid_collision"] = await ReadProblemTraceId(collision);
+                seams.UuidFactory = previousUuidFactory;
+
+                seams.BeforeCommit = (_, _) => throw new SqliteException(exceptionCanary, 19);
+                using var constraint = await AtomicityTests.PostValid(client, "logging-constraint");
+                Assert.AreEqual(HttpStatusCode.InternalServerError, constraint.StatusCode);
+                problemTraceIds["constraint"] = await ReadProblemTraceId(constraint);
                 seams.BeforeCommit = previousBeforeCommit;
 
+                seams.AfterOrderInsert = (_, _) => throw new InvalidOperationException(exceptionCanary);
+                using var rollback = await AtomicityTests.PostValid(client, "logging-rollback");
+                Assert.AreEqual(HttpStatusCode.InternalServerError, rollback.StatusCode);
+                problemTraceIds["rollback"] = await ReadProblemTraceId(rollback);
+                seams.AfterOrderInsert = previousAfterOrderInsert;
+
+                seams.CommitInvoker = transaction =>
+                {
+                    transaction.Commit();
+                    throw new InvalidOperationException(exceptionCanary);
+                };
+                using var commit = await AtomicityTests.PostValid(client, "logging-commit");
+                Assert.AreEqual(HttpStatusCode.InternalServerError, commit.StatusCode);
+                problemTraceIds["commit"] = await ReadProblemTraceId(commit);
+                seams.CommitInvoker = previousCommitInvoker;
+
+                seams.PostCommitPreResponse = _ => throw new InvalidOperationException(exceptionCanary);
+                using var confirmedCommit = await AtomicityTests.PostValid(
+                    client,
+                    "logging-confirmed-commit");
+                Assert.AreEqual(HttpStatusCode.InternalServerError, confirmedCommit.StatusCode);
+                problemTraceIds["commit_confirmed"] = await ReadProblemTraceId(confirmedCommit);
+                seams.PostCommitPreResponse = previousPostCommitPreResponse;
+
+                seams.BeforeBegin = _ => throw new InvalidOperationException(exceptionCanary);
+                using var failed = await AtomicityTests.PostValid(client, "logging-internal");
+                Assert.AreEqual(HttpStatusCode.InternalServerError, failed.StatusCode);
+                problemTraceIds["internal"] = await ReadProblemTraceId(failed);
+                seams.BeforeBegin = previousBeforeBegin;
+
+                using (var disconnected = new CancellationTokenSource())
+                {
+                    disconnected.Cancel();
+                    var disconnectedContext = new DefaultHttpContext
+                    {
+                        TraceIdentifier = disconnectTraceId,
+                        RequestAborted = disconnected.Token
+                    };
+                    disconnectedContext.Request.Method = HttpMethods.Post;
+                    var handler = new SafeExceptionHandler(
+                        factory.Services.GetRequiredService<ILoggerFactory>());
+                    Assert.IsFalse(
+                        await handler.TryHandleAsync(
+                            disconnectedContext,
+                            new OperationCanceledException(exceptionCanary),
+                            CancellationToken.None));
+                }
+
+                connectionString = factory.Services
+                    .GetRequiredService<SqliteOrderStore>()
+                    .ConnectionString;
                 synchronizedWriter.Flush();
                 var interim = buffer.ToString();
                 Assert.IsFalse(interim.Contains(orderId, StringComparison.Ordinal));
@@ -94,8 +159,12 @@ public sealed partial class LoggingTests
         }
         finally
         {
+            seams.UuidFactory = previousUuidFactory;
             seams.BeforeBegin = previousBeforeBegin;
+            seams.AfterOrderInsert = previousAfterOrderInsert;
             seams.BeforeCommit = previousBeforeCommit;
+            seams.CommitInvoker = previousCommitInvoker;
+            seams.PostCommitPreResponse = previousPostCommitPreResponse;
             synchronizedWriter.Flush();
             Console.SetOut(originalOut);
             synchronizedWriter.Dispose();
@@ -111,10 +180,12 @@ public sealed partial class LoggingTests
             customerCanary,
             productCanary,
             routeCanary,
+            queryCanary,
             headerCanary,
             exceptionCanary,
             databasePathCanary,
-            databasePath
+            databasePath,
+            connectionString
         };
         foreach (var canary in canaries)
         {
@@ -125,7 +196,7 @@ public sealed partial class LoggingTests
             .Split(["\r\n", "\n"], StringSplitOptions.RemoveEmptyEntries)
             .Where(line => line.StartsWith('{'))
             .ToArray();
-        Assert.IsTrue(lines.Length >= 7);
+        Assert.IsTrue(lines.Length >= 13);
         var applicationKeys = new HashSet<string>(
             ["operation", "httpStatus", "outcome", "durationMs", "traceId", "failureCategory"],
             StringComparer.Ordinal);
@@ -196,14 +267,8 @@ public sealed partial class LoggingTests
                     category.ValueKind == JsonValueKind.Null
                     || failureCategories.Contains(category.GetString()!));
 
-                if (state.GetProperty("httpStatus").ValueKind == JsonValueKind.Number)
-                {
-                    var status = state.GetProperty("httpStatus").GetInt32();
-                    var expectedLevel = status >= 500
-                        ? status == 503 ? "Warning" : "Error"
-                        : "Information";
-                    Assert.AreEqual(expectedLevel, root.GetProperty("LogLevel").GetString());
-                }
+                var expectedLevel = ExpectedLevel(state);
+                Assert.AreEqual(expectedLevel, root.GetProperty("LogLevel").GetString());
             }
 
             var correlated = parsed
@@ -213,7 +278,67 @@ public sealed partial class LoggingTests
                         state.GetProperty("operation").GetString() == "create_order"
                         && state.GetProperty("httpStatus").ValueKind == JsonValueKind.Number
                         && state.GetProperty("httpStatus").GetInt32() == 400);
-            Assert.AreEqual(validationTraceId, correlated.GetProperty("traceId").GetString());
+            Assert.AreEqual(
+                problemTraceIds["validation"],
+                correlated.GetProperty("traceId").GetString());
+
+            AssertScenario(
+                parsed,
+                "storage_unavailable",
+                "create_order",
+                "Warning",
+                "unavailable",
+                503,
+                problemTraceIds["storage_unavailable"]);
+            AssertScenario(
+                parsed,
+                "uuid_collision",
+                "create_order",
+                "Warning",
+                "failed",
+                500,
+                problemTraceIds["uuid_collision"]);
+            AssertScenario(
+                parsed,
+                "constraint",
+                "create_order",
+                "Error",
+                "failed",
+                500,
+                problemTraceIds["constraint"]);
+            AssertScenario(
+                parsed,
+                "rollback",
+                "create_order",
+                "Warning",
+                "failed",
+                500,
+                problemTraceIds["rollback"]);
+            AssertScenario(
+                parsed,
+                "commit",
+                "create_order",
+                "Error",
+                "failed",
+                500,
+                problemTraceIds["commit"]);
+            AssertScenario(
+                parsed,
+                "commit",
+                "create_order",
+                "Error",
+                "failed",
+                500,
+                problemTraceIds["commit_confirmed"]);
+            AssertScenario(
+                parsed,
+                "internal",
+                "create_order",
+                "Error",
+                "failed",
+                500,
+                problemTraceIds["internal"]);
+            AssertClientDisconnected(parsed, disconnectTraceId);
         }
         finally
         {
@@ -231,7 +356,13 @@ public sealed partial class LoggingTests
         Assert.IsFalse(output.Contains("Microsoft.Hosting.Lifetime", StringComparison.Ordinal));
         Assert.IsFalse(output.Contains("SELECT ", StringComparison.OrdinalIgnoreCase));
         Assert.IsFalse(output.Contains("INSERT ", StringComparison.OrdinalIgnoreCase));
+        Assert.IsFalse(output.Contains("PRAGMA ", StringComparison.OrdinalIgnoreCase));
+        Assert.IsFalse(output.Contains("$orderId", StringComparison.Ordinal));
+        Assert.IsFalse(output.Contains("$customerId", StringComparison.Ordinal));
+        Assert.IsFalse(output.Contains("$productId", StringComparison.Ordinal));
+        Assert.IsFalse(output.Contains("$quantity", StringComparison.Ordinal));
         Assert.IsFalse(output.Contains("System.", StringComparison.Ordinal));
+        Assert.IsFalse(output.Contains(" at ", StringComparison.Ordinal));
 
         AssertNativeFormatterConfiguration();
     }
@@ -334,6 +465,109 @@ public sealed partial class LoggingTests
                 && !path.EndsWith("packages.lock.json", StringComparison.OrdinalIgnoreCase))
             .ToArray();
         Assert.AreEqual(0, unclassifiedDatasets.Length);
+    }
+
+    private static async Task<string> ReadProblemTraceId(HttpResponseMessage response)
+    {
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        return body.RootElement.GetProperty("traceId").GetString()
+            ?? throw new AssertFailedException("Problem Details traceId is required.");
+    }
+
+    private static string ExpectedLevel(JsonElement state)
+    {
+        var outcome = state.GetProperty("outcome").GetString();
+        var categoryElement = state.GetProperty("failureCategory");
+        var category = categoryElement.ValueKind == JsonValueKind.Null
+            ? null
+            : categoryElement.GetString();
+        var statusElement = state.GetProperty("httpStatus");
+
+        if (string.Equals(outcome, "client_disconnected", StringComparison.Ordinal)
+            || (statusElement.ValueKind == JsonValueKind.Number
+                && statusElement.GetInt32() == StatusCodes.Status503ServiceUnavailable)
+            || string.Equals(category, "uuid_collision", StringComparison.Ordinal)
+            || string.Equals(category, "rollback", StringComparison.Ordinal))
+        {
+            return "Warning";
+        }
+
+        if ((statusElement.ValueKind == JsonValueKind.Number
+             && statusElement.GetInt32() >= StatusCodes.Status500InternalServerError)
+            || (string.Equals(state.GetProperty("operation").GetString(), "startup", StringComparison.Ordinal)
+                && string.Equals(outcome, "failed", StringComparison.Ordinal)))
+        {
+            return "Error";
+        }
+
+        return "Information";
+    }
+
+    private static void AssertScenario(
+        IReadOnlyCollection<JsonDocument> documents,
+        string failureCategory,
+        string operation,
+        string level,
+        string outcome,
+        int httpStatus,
+        string traceId)
+    {
+        var matches = documents
+            .Where(
+                document =>
+                {
+                    var state = document.RootElement.GetProperty("State");
+                    var category = state.GetProperty("failureCategory");
+                    return category.ValueKind == JsonValueKind.String
+                           && string.Equals(
+                               category.GetString(),
+                               failureCategory,
+                               StringComparison.Ordinal)
+                           && string.Equals(
+                               state.GetProperty("traceId").GetString(),
+                               traceId,
+                               StringComparison.Ordinal);
+                })
+            .ToArray();
+        Assert.AreEqual(
+            1,
+            matches.Length,
+            $"Expected one operational event for {failureCategory} and its response traceId.");
+
+        var root = matches[0].RootElement;
+        var state = root.GetProperty("State");
+        Assert.AreEqual(operation, state.GetProperty("operation").GetString());
+        Assert.AreEqual(level, root.GetProperty("LogLevel").GetString());
+        Assert.AreEqual(outcome, state.GetProperty("outcome").GetString());
+        Assert.AreEqual(failureCategory, state.GetProperty("failureCategory").GetString());
+        Assert.AreEqual(httpStatus, state.GetProperty("httpStatus").GetInt32());
+        Assert.AreEqual(traceId, state.GetProperty("traceId").GetString());
+    }
+
+    private static void AssertClientDisconnected(
+        IReadOnlyCollection<JsonDocument> documents,
+        string traceId)
+    {
+        var matches = documents
+            .Where(
+                document =>
+                    string.Equals(
+                        document.RootElement
+                            .GetProperty("State")
+                            .GetProperty("outcome")
+                            .GetString(),
+                        "client_disconnected",
+                        StringComparison.Ordinal))
+            .ToArray();
+        Assert.AreEqual(1, matches.Length, "Expected one client disconnect operational event.");
+
+        var root = matches[0].RootElement;
+        var state = root.GetProperty("State");
+        Assert.AreEqual("create_order", state.GetProperty("operation").GetString());
+        Assert.AreEqual("Warning", root.GetProperty("LogLevel").GetString());
+        Assert.AreEqual(JsonValueKind.Null, state.GetProperty("httpStatus").ValueKind);
+        Assert.AreEqual(JsonValueKind.Null, state.GetProperty("failureCategory").ValueKind);
+        Assert.AreEqual(traceId, state.GetProperty("traceId").GetString());
     }
 
     private static void AssertNativeFormatterConfiguration()

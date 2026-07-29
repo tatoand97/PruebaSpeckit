@@ -178,10 +178,13 @@ app.MapPost(
         }
 
         Order order;
+        var commitConfirmedByStore = false;
         try
         {
             order = await store.CreateAsync(validation.Value!, cancellationToken);
+            commitConfirmedByStore = true;
             seams.PostCommitPreResponse(order.OrderId);
+            cancellationToken.ThrowIfCancellationRequested();
         }
         catch (OrderTemporarilyUnavailableException exception)
         {
@@ -189,6 +192,7 @@ app.MapPost(
                 context,
                 logger,
                 timer,
+                LogLevel.Warning,
                 "create_order",
                 StatusCodes.Status503ServiceUnavailable,
                 "unavailable",
@@ -201,10 +205,37 @@ app.MapPost(
                 context,
                 logger,
                 timer,
+                LogLevel.Warning,
                 "create_order",
                 StatusCodes.Status500InternalServerError,
                 "failed",
                 "uuid_collision",
+                OrderProblems.Internal(context, OrderProblems.OrdersInstance));
+        }
+        catch (OrderConstraintException)
+        {
+            return CompleteProblem(
+                context,
+                logger,
+                timer,
+                LogLevel.Error,
+                "create_order",
+                StatusCodes.Status500InternalServerError,
+                "failed",
+                "constraint",
+                OrderProblems.Internal(context, OrderProblems.OrdersInstance));
+        }
+        catch (OrderRollbackException)
+        {
+            return CompleteProblem(
+                context,
+                logger,
+                timer,
+                LogLevel.Warning,
+                "create_order",
+                StatusCodes.Status500InternalServerError,
+                "failed",
+                "rollback",
                 OrderProblems.Internal(context, OrderProblems.OrdersInstance));
         }
         catch (OrderCommitUncertainException)
@@ -213,6 +244,7 @@ app.MapPost(
                 context,
                 logger,
                 timer,
+                LogLevel.Error,
                 "create_order",
                 StatusCodes.Status500InternalServerError,
                 "failed",
@@ -225,6 +257,7 @@ app.MapPost(
                 context,
                 logger,
                 timer,
+                LogLevel.Error,
                 "create_order",
                 StatusCodes.Status500InternalServerError,
                 "failed",
@@ -235,12 +268,26 @@ app.MapPost(
         {
             throw;
         }
+        catch when (commitConfirmedByStore)
+        {
+            return CompleteProblem(
+                context,
+                logger,
+                timer,
+                LogLevel.Error,
+                "create_order",
+                StatusCodes.Status500InternalServerError,
+                "failed",
+                "commit",
+                OrderProblems.Internal(context, OrderProblems.OrdersInstance));
+        }
         catch
         {
             return CompleteProblem(
                 context,
                 logger,
                 timer,
+                LogLevel.Error,
                 "create_order",
                 StatusCodes.Status500InternalServerError,
                 "failed",
@@ -305,6 +352,7 @@ app.MapGet(
                 context,
                 logger,
                 timer,
+                LogLevel.Warning,
                 "get_order",
                 StatusCodes.Status503ServiceUnavailable,
                 "unavailable",
@@ -317,6 +365,7 @@ app.MapGet(
                 context,
                 logger,
                 timer,
+                LogLevel.Error,
                 "get_order",
                 StatusCodes.Status500InternalServerError,
                 "failed",
@@ -387,6 +436,7 @@ static IResult CompleteProblem(
     HttpContext context,
     ILogger logger,
     Stopwatch timer,
+    LogLevel level,
     string operation,
     int status,
     string outcome,
@@ -396,7 +446,7 @@ static IResult CompleteProblem(
     timer.Stop();
     OrderLog.Write(
         logger,
-        status == StatusCodes.Status503ServiceUnavailable ? LogLevel.Warning : LogLevel.Error,
+        level,
         operation,
         status,
         outcome,
@@ -416,13 +466,27 @@ internal sealed class SafeExceptionHandler(
         Exception exception,
         CancellationToken cancellationToken)
     {
+        var (operation, instance) = ResolveRoute(httpContext);
+        if (httpContext.RequestAborted.IsCancellationRequested)
+        {
+            OrderLog.Write(
+                _logger,
+                LogLevel.Warning,
+                operation,
+                null,
+                "client_disconnected",
+                0,
+                httpContext.TraceIdentifier,
+                null);
+            return false;
+        }
+
         _ = exception;
         if (httpContext.Response.HasStarted)
         {
             return false;
         }
 
-        var (operation, instance) = ResolveRoute(httpContext);
         OrderLog.Write(
             _logger,
             LogLevel.Error,

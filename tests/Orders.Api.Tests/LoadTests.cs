@@ -59,6 +59,7 @@ public sealed class LoadTests
         Assert.AreEqual(0, measured.Unexpected);
         Assert.AreEqual(125, measured.CreatedIds.Count);
         Assert.AreEqual(125, measured.CreatedIds.Distinct(StringComparer.Ordinal).Count());
+        Assert.AreEqual(125, measured.ValidatedCreatedAggregates);
         Assert.AreEqual(500, measured.SuccessfulDurationsMs.Count);
         Assert.AreEqual(150L, AtomicityTests.CountRows(measurementStorage.DatabasePath, "orders"));
         Assert.AreEqual(275L, AtomicityTests.CountRows(measurementStorage.DatabasePath, "order_items"));
@@ -157,6 +158,9 @@ public sealed class LoadTests
         {
             await barrier.SignalAndWaitAsync();
             Interlocked.Increment(ref result.PostSent);
+            var expectedItems = new ExpectedItems(
+                $"{prefix}-product-A-{user:D2}-{cycle:D2}",
+                $"{prefix}-product-B-{user:D2}-{cycle:D2}");
             var createRequest = new HttpRequestMessage(HttpMethod.Post, "/orders")
             {
                 Content = JsonContent.Create(
@@ -167,12 +171,12 @@ public sealed class LoadTests
                         {
                             new
                             {
-                                productId = $"{prefix}-product-A-{user:D2}-{cycle:D2}",
+                                productId = expectedItems.ProductA,
                                 quantity = 1L
                             },
                             new
                             {
-                                productId = $"{prefix}-product-B-{user:D2}-{cycle:D2}",
+                                productId = expectedItems.ProductB,
                                 quantity = 2L
                             }
                         }
@@ -181,16 +185,23 @@ public sealed class LoadTests
             var createdId = await SendCreate(client, createRequest, result);
             var ownId = createdId ?? seedIds[user];
 
-            await SendGet(client, $"/orders/{ownId}", ownId, result);
+            await SendGet(
+                client,
+                $"/orders/{ownId}",
+                ownId,
+                createdId is null ? null : expectedItems,
+                result);
             await SendGet(
                 client,
                 $"/orders/{seedIds[(user + cycle) % seedIds.Count]}",
                 seedIds[(user + cycle) % seedIds.Count],
+                null,
                 result);
             await SendGet(
                 client,
                 $"/orders/{seedIds[(user + cycle + 7) % seedIds.Count]}",
                 seedIds[(user + cycle + 7) % seedIds.Count],
+                null,
                 result);
         }
     }
@@ -258,6 +269,7 @@ public sealed class LoadTests
         HttpClient client,
         string location,
         string expectedId,
+        ExpectedItems? expectedItems,
         LoadResult result)
     {
         Interlocked.Increment(ref result.GetSent);
@@ -274,14 +286,30 @@ public sealed class LoadTests
             timer.Stop();
             if (response.StatusCode == HttpStatusCode.OK)
             {
-                using var body = JsonDocument.Parse(bytes);
-                var root = body.RootElement;
-                if (root.GetProperty("orderId").GetString() != expectedId
-                    || root.GetProperty("status").GetString() != "Pending"
-                    || root.GetProperty("items").GetArrayLength() == 0)
+                try
+                {
+                    using var body = JsonDocument.Parse(bytes);
+                    var root = body.RootElement;
+                    if (!MatchesExpectedOrder(root, expectedId, expectedItems))
+                    {
+                        Interlocked.Increment(ref result.Unexpected);
+                        return;
+                    }
+                }
+                catch (JsonException)
                 {
                     Interlocked.Increment(ref result.Unexpected);
                     return;
+                }
+                catch (InvalidOperationException)
+                {
+                    Interlocked.Increment(ref result.Unexpected);
+                    return;
+                }
+
+                if (expectedItems is not null)
+                {
+                    Interlocked.Increment(ref result.ValidatedCreatedAggregates);
                 }
 
                 Interlocked.Increment(ref result.Success200);
@@ -308,6 +336,70 @@ public sealed class LoadTests
         }
     }
 
+    private static bool MatchesExpectedOrder(
+        JsonElement root,
+        string expectedId,
+        ExpectedItems? expectedItems)
+    {
+        if (root.ValueKind != JsonValueKind.Object
+            || !root.TryGetProperty("orderId", out var orderId)
+            || orderId.ValueKind != JsonValueKind.String
+            || !string.Equals(orderId.GetString(), expectedId, StringComparison.Ordinal)
+            || !root.TryGetProperty("status", out var status)
+            || status.ValueKind != JsonValueKind.String
+            || !string.Equals(status.GetString(), "Pending", StringComparison.Ordinal)
+            || !root.TryGetProperty("items", out var items)
+            || items.ValueKind != JsonValueKind.Array)
+        {
+            return false;
+        }
+
+        if (expectedItems is null)
+        {
+            return items.GetArrayLength() > 0;
+        }
+
+        if (items.GetArrayLength() != 2)
+        {
+            return false;
+        }
+
+        var productACount = 0;
+        var productBCount = 0;
+        foreach (var item in items.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.Object
+                || !item.TryGetProperty("productId", out var productId)
+                || productId.ValueKind != JsonValueKind.String
+                || !item.TryGetProperty("quantity", out var quantity)
+                || quantity.ValueKind != JsonValueKind.Number
+                || !quantity.TryGetInt64(out var quantityValue))
+            {
+                return false;
+            }
+
+            var productIdValue = productId.GetString();
+            if (string.Equals(productIdValue, expectedItems.ProductA, StringComparison.Ordinal)
+                && quantityValue == 1)
+            {
+                productACount++;
+            }
+            else if (string.Equals(productIdValue, expectedItems.ProductB, StringComparison.Ordinal)
+                     && quantityValue == 2)
+            {
+                productBCount++;
+            }
+            else
+            {
+                return false;
+            }
+        }
+
+        return productACount == 1 && productBCount == 1;
+    }
+
+    private sealed record ExpectedItems(string ProductA, string ProductB);
+
     private sealed class LoadResult
     {
         internal readonly ConcurrentBag<double> SuccessfulDurationsMs = [];
@@ -319,6 +411,7 @@ public sealed class LoadTests
         internal int Unavailable503;
         internal int Timeouts;
         internal int Unexpected;
+        internal int ValidatedCreatedAggregates;
     }
 
     private sealed class AsyncCycleBarrier

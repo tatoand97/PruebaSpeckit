@@ -111,11 +111,13 @@ internal sealed class SqliteOrderStore
                     SqliteTransaction? transaction = null;
                     var commitInvocationStarted = false;
                     var commitConfirmed = false;
+                    var orderRowInserted = false;
                     try
                     {
                         _seams.BeforeBegin(connection);
                         transaction = connection.BeginTransaction(deferred: false);
                         InsertOrder(connection, transaction, orderId, request.CustomerId);
+                        orderRowInserted = true;
                         _seams.AfterOrderInsert(connection, orderId);
                         InsertItems(connection, transaction, orderId, request.Items);
                         _seams.AfterItemsInsert(connection, orderId);
@@ -129,13 +131,39 @@ internal sealed class SqliteOrderStore
                         return new Order(orderId, request.CustomerId, request.Items);
                     }
                     catch (SqliteException exception)
-                        when (!commitInvocationStarted && IsOrderIdCollision(exception))
+                        when (!commitInvocationStarted
+                              && !orderRowInserted
+                              && IsOrderIdCollision(exception))
                     {
                         RollbackKnownPreCommit(transaction);
                         if (attempt == 3)
                         {
                             throw new OrderUuidCollisionException(exception);
                         }
+                    }
+                    catch (SqliteException exception)
+                        when (!commitInvocationStarted && IsTemporarySqliteFailure(exception))
+                    {
+                        RollbackKnownPreCommit(transaction);
+                        throw new OrderTemporarilyUnavailableException("sqlite_busy", exception);
+                    }
+                    catch (SqliteException exception)
+                        when (!commitInvocationStarted && IsConstraintFailure(exception))
+                    {
+                        RollbackKnownPreCommit(transaction);
+                        throw new OrderConstraintException(exception);
+                    }
+                    catch (OrderTemporarilyUnavailableException)
+                        when (!commitInvocationStarted)
+                    {
+                        RollbackKnownPreCommit(transaction);
+                        throw;
+                    }
+                    catch (OperationCanceledException)
+                        when (!commitInvocationStarted)
+                    {
+                        RollbackKnownPreCommit(transaction);
+                        throw;
                     }
                     catch (Exception exception) when (commitInvocationStarted && !commitConfirmed)
                     {
@@ -145,10 +173,15 @@ internal sealed class SqliteOrderStore
                     {
                         throw new OrderConfirmedPostCommitException(exception);
                     }
-                    catch
+                    catch (Exception exception)
                     {
+                        if (transaction is null)
+                        {
+                            throw;
+                        }
+
                         RollbackKnownPreCommit(transaction);
-                        throw;
+                        throw new OrderRollbackException(exception);
                     }
                     finally
                     {
@@ -329,6 +362,9 @@ internal sealed class SqliteOrderStore
     private static bool IsTemporarySqliteFailure(SqliteException exception) =>
         exception.SqliteErrorCode is 5 or 6;
 
+    private static bool IsConstraintFailure(SqliteException exception) =>
+        exception.SqliteErrorCode == 19;
+
     private static void RollbackKnownPreCommit(SqliteTransaction? transaction)
     {
         if (transaction is null)
@@ -340,13 +376,9 @@ internal sealed class SqliteOrderStore
         {
             transaction.Rollback();
         }
-        catch (InvalidOperationException)
+        catch (Exception exception)
         {
-            // The transaction is already inactive. The original failure remains authoritative.
-        }
-        catch (SqliteException)
-        {
-            // Rollback failure is handled as the original generic pre-commit failure.
+            throw new OrderRollbackException(exception);
         }
     }
 
@@ -516,6 +548,12 @@ internal sealed class OrderTemporarilyUnavailableException(string category, Exce
 
 internal sealed class OrderUuidCollisionException(Exception inner)
     : Exception("The UUID collision budget was exhausted.", inner);
+
+internal sealed class OrderConstraintException(Exception inner)
+    : Exception("An unexpected SQLite constraint rejected the order.", inner);
+
+internal sealed class OrderRollbackException(Exception inner)
+    : Exception("The order attempt crossed a rollback boundary.", inner);
 
 internal sealed class OrderCommitUncertainException(Exception inner)
     : Exception("The commit outcome is uncertain.", inner);
