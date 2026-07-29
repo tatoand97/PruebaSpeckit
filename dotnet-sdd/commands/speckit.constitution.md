@@ -6,6 +6,9 @@ inmutable para este proyecto:
 - preserve Specification First, DDD modular boundaries, Clean Architecture, simplicidad, .NET 10,
   Repository Pattern, Wolverine mediator, Minimal APIs, unit testing/coverage, errores
   estandarizados, observabilidad, reproducibilidad y la separación de gates posteriores;
+- preserve también Azure App Configuration como integración de código obligatoria, el ownership
+  modular de excepciones conocidas, Redocly CLI `2.41.1` como validator OpenAPI y la exclusión del
+  versionado/despliegue del esquema físico;
 - permita agregar reglas específicas del proyecto únicamente cuando no debiliten ni contradigan
   esa línea base;
 - ante una solicitud contradictoria, no modifique silenciosamente la obligación: identifique el

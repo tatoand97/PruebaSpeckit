@@ -52,9 +52,12 @@ al nombre raíz.
   3. Respete la dirección de dependencias y el flujo Presentation -> Wolverine -> Application.
   4. Para persistencia, use las abstracciones e implementaciones específicas justificadas.
   5. Si existe HTTP, mapee cada operación/error de contracts/openapi.yaml a tareas de
-     implementación y consistencia.
-  6. Incluya unit tests significativos y evidencia de coverage.
-  7. Incluya las validaciones locales finales.
+     implementación, Redocly lint y consistencia.
+  6. Asigne fallos conocidos a Module.Presentation y el fallback inesperado a
+     Common.Presentation sin referencias hacia módulos.
+  7. Incluya la integración de código obligatoria con Azure App Configuration.
+  8. Incluya unit tests significativos y evidencia de coverage.
+  9. Incluya las validaciones locales finales.
 
   No conserve placeholders ni tareas ilustrativas en el tasks.md generado.
 -->
@@ -81,7 +84,10 @@ Genere solo los fundamentos compartidos que realmente sean necesarios, por ejemp
 
 - composición del módulo y del Server;
 - configuración Wolverine `DurabilityMode.MediatorOnly`;
-- manejo global con `IExceptionHandler` y `AddProblemDetails()`;
+- handlers del módulo para fallos conocidos y fallback transversal en `Common.Presentation`, todos
+  con `IExceptionHandler` y Problem Details;
+- integración de Azure App Configuration con endpoint externo y `DefaultAzureCredential`, activa
+  solo cuando el endpoint esté presente;
 - configuración transversal aplicable;
 - abstracciones específicas de persistencia que varias stories compartan.
 
@@ -157,8 +163,11 @@ Genere tareas concretas, sin duplicar verificaciones ya cubiertas:
 - [ ] T0XX Ejecutar todos los unit tests xUnit mediante `[exact command]` y registrar el resultado
 - [ ] T0XX Medir con Coverlet al menos 80% de line coverage sobre `[business-logic scope]` mediante `[exact command]`
 - [ ] T0XX Auditar referencias de proyectos y flujo Wolverine contra Architecture Compliance en `specs/[feature]/plan.md`
-- [ ] T0XX Validar que `specs/[feature]/contracts/openapi.yaml` coincide con endpoints y errores HTTP implementados [eliminar si no hay HTTP]
-- [ ] T0XX Validar Problem Details, ausencia de secretos hardcoded y estándares transversales aplicables en `[exact paths]`
+- [ ] T0XX Ejecutar `npx --yes @redocly/cli@2.41.1 lint specs/[feature]/contracts/openapi.yaml` y registrar exit code cero [eliminar si no hay HTTP]
+- [ ] T0XX Comparar `specs/[feature]/contracts/openapi.yaml` con endpoints y errores HTTP implementados [eliminar si no hay HTTP]
+- [ ] T0XX Validar Problem Details y el ownership Module/Common de excepciones en `[exact paths]`
+- [ ] T0XX Validar la integración de Azure App Configuration, activación condicional por endpoint y ausencia de secretos hardcoded en `[exact paths]`
+- [ ] T0XX Validar los demás estándares transversales aplicables en `[exact paths]`
 - [ ] T0XX Registrar la evidencia local final en `[feature artifact or agreed evidence path]`
 
 `speckit.converge` se ejecuta después de `speckit.implement`; no lo convierta en una tarea circular.
@@ -195,6 +204,8 @@ Este `tasks.md` NO debe incluir tareas para:
 - CI/CD;
 - deployment;
 - collectors, dashboards, recursos Azure o infraestructura externa;
+- versionado, creación, actualización o despliegue del esquema físico de base de datos;
+- EF Core Migrations, `dotnet-ef`, snapshots, database update o `EnsureCreated()` como política;
 - colas, brokers, outbox, inbox, sagas o durable messaging; ni
 - abstracciones sin una necesidad trazable.
 
@@ -208,6 +219,6 @@ Al finalizar, resuma:
 - tasks completadas y cualquier bloqueo;
 - comandos de restore/build/test/coverage y resultados;
 - cobertura obtenida y alcance medido;
-- resultado de arquitectura y OpenAPI;
-- puntos transversales aplicables; y
+- resultado de arquitectura, Redocly lint y consistencia OpenAPI;
+- integración de Azure App Configuration, ownership de excepciones y demás puntos transversales; y
 - siguiente paso: `speckit.converge`.

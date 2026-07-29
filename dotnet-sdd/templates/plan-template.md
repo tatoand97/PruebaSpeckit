@@ -49,7 +49,12 @@ spec.md.]
 - [ ] El acceso a persistencia pasa por Repository Pattern.
 - [ ] La estrategia contempla únicamente unit tests y coverage de lógica de negocio.
 - [ ] Los contratos HTTP y errores relevantes se mantienen en OpenAPI cuando aplican.
-- [ ] Los estándares transversales aplicables están considerados.
+- [ ] Redocly CLI `2.41.1` valida estáticamente OpenAPI con una ejecución reproducible.
+- [ ] Los fallos conocidos se traducen en `Module.Presentation` y el fallback inesperado permanece
+  en `Common.Presentation` sin dependencias hacia módulos.
+- [ ] Los estándares transversales aplicables están considerados y Azure App Configuration está
+  integrado obligatoriamente en código.
+- [ ] El versionado y despliegue del esquema físico permanecen fuera del alcance del preset.
 - [ ] El plan no agrega controles o herramientas fuera del alcance V1.
 
 **Gate Result**: [PASS / FAIL]
@@ -79,12 +84,14 @@ No cree un módulo para una base de datos, protocolo, framework o preocupación 
 | `[Module].Domain` | `Common.Domain` only when needed | [path and references] | [PASS/FAIL] |
 | `[Module].Application` | `[Module].Domain` | [path and references] | [PASS/FAIL] |
 | `[Module].Infrastructure` | `[Module].Application`, `Common.Infrastructure`, Domain if needed | [path and references] | [PASS/FAIL] |
-| `[Module].Presentation` | `[Module].Infrastructure`, `Common.Presentation` | [path and references] | [PASS/FAIL] |
+| `[Module].Presentation` | Infrastructure/Application/Domain del mismo módulo cuando sean necesarios; `Common.Presentation` | [path and references] | [PASS/FAIL] |
+| `Common.Presentation` | Manejo HTTP transversal sin referencias `Modules.*` | [path and references] | [PASS/FAIL] |
 | `<ProjectName>.Server` | `Common.Presentation`, module Presentation projects | [path and references] | [PASS/FAIL] |
 
 Domain MUST NOT reference Application, Infrastructure, Presentation or Api. Application MUST NOT
 reference concrete persistence or Presentation. Presentation MUST NOT access repositories,
-`DbContext` or MongoDB directly.
+`DbContext` or MongoDB directly. `Common.Presentation` MUST NOT reference Domain, Application,
+Infrastructure or Presentation de ningún módulo.
 
 ### Request Flow and Mediation
 
@@ -112,6 +119,8 @@ Minimal API
 - **Repository abstractions**: [Only the interfaces required by actual use cases]
 - **Infrastructure implementations**: [Concrete projects and paths]
 - **Direct access audit**: [Evidence that handlers and Presentation do not use concrete storage]
+- **Physical schema lifecycle**: Fuera del alcance; no EF Core Migrations, `dotnet-ef`, snapshots,
+  database update ni `EnsureCreated()` como política sustituta
 
 Do not add both supported engines unless the specification requires both. Do not introduce a
 generic repository by default.
@@ -182,13 +191,22 @@ Complete esta sección para features HTTP; de lo contrario marque `N/A` con raz�
 - **OpenAPI artifact**: `specs/[###-feature-name]/contracts/openapi.yaml`
 - **Success responses**: [Statuses and schemas]
 - **Relevant error responses**: [400/401/403/404/409/500 and justified variations]
-- **Problem Details**: [Mapping through `IExceptionHandler` and `AddProblemDetails()`]
+- **Module exception ownership**: [Known Domain/Application failures mapped in
+  `Module.Presentation`]
+- **Common fallback**: [Unexpected/cross-cutting 500 in `Common.Presentation`, with no `Modules.*`
+  reference]
+- **Problem Details**: [Use through every `IExceptionHandler` and `AddProblemDetails()`]
 - **Validation errors**: [FluentValidation and optional `errors` extension]
 - **Safe diagnostics**: [Trace/correlation; no internal or sensitive response details]
+- **Static validator**:
+  `npx --yes @redocly/cli@2.41.1 lint specs/[###-feature-name]/contracts/openapi.yaml`
+- **Validator prerequisites**: npm `>=10`; Node.js `>=22.12.0` or `>=20.19.0 <21.0.0`
+- **Lint evidence**: [Command result and exit code 0]
 - **Consistency method**: [How spec, plan, OpenAPI and implementation will be compared]
 
 OpenAPI is mandatory for HTTP but contract-first is not. The final artifact must represent the
-implemented endpoints and their relevant errors.
+implemented endpoints and their relevant errors. Redocly lint is static validation, not a runtime
+contract test or evidence by itself that code and contract are equivalent.
 
 ## Cross-Cutting Standards
 
@@ -198,9 +216,16 @@ implemented endpoints and their relevant errors.
 | Serilog | [Existing standard reused or required change] | [path] | [No secrets/tokens] |
 | OpenTelemetry | [Traces/metrics relevant to feature] | [path] | [Cardinality/data guard] |
 | HealthChecks | [Dependency health or no new check needed] | [path] | [Safe output] |
-| Azure App Configuration | [Configuration source/refresh or no feature change] | [path] | [No hardcoded secret] |
+| Azure App Configuration | [Mandatory provider integration, external endpoint, `DefaultAzureCredential`; refresh only if needed] | [exact code/package path] | [No hardcoded secret or connection string] |
 
-No collectors, dashboards, external infrastructure or Azure resources are created in this stage.
+Azure App Configuration cannot be `N/A`. The provider must be represented in code and activated
+only when the external endpoint exists, so local restore, build and unit tests do not require Azure.
+Use `Microsoft.Azure.AppConfiguration.AspNetCore` and `Azure.Identity`;
+`builder.Services.AddAzureAppConfiguration()` and `app.UseAzureAppConfiguration()` are required
+only if the selected refresh mechanism needs them.
+
+No collectors, dashboards, external infrastructure, Azure resources, credentials, secrets or
+pipelines are created in this stage.
 
 ## Unit Testing and Coverage Strategy
 
@@ -211,7 +236,7 @@ No collectors, dashboards, external infrastructure or Azure resources are create
 - **xUnit command**: [Reproducible command]
 - **Coverlet command/report**: [Reproducible command and report path]
 - **Line coverage threshold**: `>= 80%` for business logic
-- **Justified exclusions**: [DTOs without logic, bootstrap, DI, migrations, generated code, etc.]
+- **Justified exclusions**: [DTOs without logic, bootstrap, DI, generated code, etc.]
 
 Do not generate integration, performance, DAST, SAST or coverage-padding tests.
 
@@ -237,21 +262,27 @@ Do not generate integration, performance, DAST, SAST or coverage-padding tests.
 - [ ] Todos los unit tests xUnit pasan.
 - [ ] Coverlet demuestra al menos 80% de line coverage sobre lógica de negocio con tests
   significativos.
-- [ ] `contracts/openapi.yaml` existe para HTTP y coincide con endpoints y errores implementados.
+- [ ] `contracts/openapi.yaml` existe para HTTP.
+- [ ] Redocly CLI `2.41.1` lint finaliza con código cero para el contrato.
+- [ ] OpenAPI coincide con endpoints y errores implementados.
 - [ ] Los módulos corresponden a límites DDD y contienen Domain/Application/Infrastructure/
   Presentation.
 - [ ] Las referencias entre proyectos respetan la dirección autorizada.
 - [ ] Repository Pattern, Wolverine mediator y Minimal APIs están respetados.
 - [ ] FluentValidation está aplicado donde existe validación.
-- [ ] Serilog, OpenTelemetry, HealthChecks y Azure App Configuration cumplen el estándar aplicable.
+- [ ] Serilog, OpenTelemetry y HealthChecks cumplen el estándar aplicable.
+- [ ] Azure App Configuration está integrado en código y no está marcado `N/A`.
 - [ ] No existen secretos hardcoded ni respuestas/logs con información sensible innecesaria.
 - [ ] Los errores HTTP usan Problem Details.
+- [ ] Los errores conocidos pertenecen a `Module.Presentation`; el fallback inesperado pertenece a
+  `Common.Presentation`, que no referencia `Modules.*`.
 - [ ] `speckit.converge` finaliza sin brechas pendientes.
 
 **Evidence commands and locations**: [Restore/build/test/coverage commands, reports and contract path]
 
 ## Later SDLC Gates — Not Generated Here
 
-Sonar, Veracode, SAST, DAST, performance testing, integration testing, CI/CD y deployment están
-fuera de esta V1. Pueden existir como requisitos o gates organizacionales posteriores, pero este
-plan no crea sus herramientas, pipelines, suites ni tareas de ejecución.
+Sonar, Veracode, SAST, DAST, performance testing, integration testing, CI/CD, deployment,
+provisioning de recursos Azure y versionado o despliegue del esquema físico están fuera de esta
+V1. Pueden existir como requisitos o gates organizacionales posteriores, pero este plan no crea
+sus herramientas, pipelines, suites ni tareas de ejecución.

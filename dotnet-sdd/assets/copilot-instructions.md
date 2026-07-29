@@ -8,6 +8,15 @@
 - Use Minimal APIs and delegate application work through Wolverine mediator.
 - Add only abstractions justified by a requirement or concrete technical need.
 - After code changes, run the applicable restore, Release build, unit tests and coverage checks.
-- Keep OpenAPI consistent with implemented HTTP behavior and relevant errors.
+- Validate HTTP OpenAPI statically with
+  `npx --yes @redocly/cli@2.41.1 lint specs/<feature>/contracts/openapi.yaml`, then compare it
+  separately with implemented behavior.
+- Keep known module failure mapping in `Module.Presentation`; keep only unexpected cross-cutting
+  fallback handling in `Common.Presentation`, which must not reference `Modules.*`.
+- Integrate Azure App Configuration in code with its ASP.NET Core provider,
+  `DefaultAzureCredential` and an externally supplied endpoint; skip remote provider activation
+  when the endpoint is absent so local restore, build and unit tests remain offline-capable.
+- Do not use EF Core Migrations, `dotnet-ef`, schema snapshots, database update commands or
+  `EnsureCreated()` as a replacement policy.
 - Never expose or log secrets, tokens or unnecessary sensitive information.
 - Avoid multi-agent execution by default and keep model context reasonably small.

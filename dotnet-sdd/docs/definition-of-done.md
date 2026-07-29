@@ -16,6 +16,8 @@ tarea no puede marcarse como completada por intención o por trabajo parcial.
   - [ ] La medición usa Coverlet.
   - [ ] Los tests validan comportamiento significativo.
 - [ ] `contracts/openapi.yaml` existe cuando la feature expone HTTP.
+- [ ] Redocly CLI `2.41.1` ejecuta con código cero:
+  `npx --yes @redocly/cli@2.41.1 lint specs/<feature>/contracts/openapi.yaml`.
 - [ ] `openapi.yaml` representa los endpoints implementados.
 - [ ] `openapi.yaml` representa los errores HTTP relevantes.
 - [ ] Clean Architecture está respetada.
@@ -29,14 +31,25 @@ tarea no puede marcarse como completada por intención o por trabajo parcial.
 - [ ] Serilog está configurado según el estándar existente.
 - [ ] OpenTelemetry está integrado según el estándar existente.
 - [ ] HealthChecks están integrados según el estándar existente.
-- [ ] Azure App Configuration está integrado según el estándar existente.
+- [ ] Azure App Configuration está integrado en código mediante el provider oficial, un endpoint
+  externo y `DefaultAzureCredential`; su ausencia impide declarar `PASS`.
+- [ ] La ausencia del endpoint permite restore, build y unit tests locales sin conectarse a Azure.
 - [ ] No existen secretos hardcoded.
 - [ ] Los errores HTTP siguen el estándar Problem Details.
+- [ ] Los errores conocidos específicos de un módulo se traducen en `Module.Presentation`.
+- [ ] `Common.Presentation` maneja solo el fallback inesperado/transversal y no referencia ningún
+  proyecto `Modules.<Module>.*`.
 - [ ] `speckit.converge` finaliza sin brechas pendientes.
+
+Redocly lint valida la estructura y las reglas estáticas OpenAPI. Los dos checks posteriores del
+contrato validan por separado la consistencia entre OpenAPI y los endpoints implementados; el lint
+no es una prueba runtime de equivalencia.
 
 Un punto transversal puede declararse `N/A` solo con una justificación concreta en `plan.md`. Por
 ejemplo, una feature que no agrega una dependencia operativa puede no requerir un HealthCheck
-nuevo; eso no permite retirar el estándar ya configurado en la solución.
+nuevo; eso no permite retirar el estándar ya configurado en la solución. Azure App Configuration
+no puede declararse `N/A`: la integración de código es obligatoria aunque el recurso, el endpoint y
+la conectividad remota estén fuera del DoD local.
 
 ## Evidencia mínima
 
@@ -46,7 +59,8 @@ El cierre debe registrar:
 - resumen de unit tests;
 - reporte y umbral de coverage;
 - resultado del build Release;
-- ubicación del contrato OpenAPI, cuando aplique; y
+- ubicación del contrato OpenAPI y resultado de Redocly lint, cuando aplique;
+- evidencia de integración de Azure App Configuration y ownership de excepciones; y
 - resultado final de convergencia.
 
 ## Controles posteriores del SDLC
@@ -60,7 +74,9 @@ Los siguientes controles no se generan ni se ejecutan en esta V1:
 - performance testing;
 - integration testing;
 - CI/CD; y
-- deployment.
+- deployment;
+- provisioning de recursos Azure; y
+- versionado o despliegue del esquema físico de base de datos.
 
 Pertenecen a etapas posteriores del SDLC. Las features deben seguir especificando seguridad,
 calidad y performance cuando sean requisitos, pero `tasks.md` no debe fingir que ejecutó esos gates

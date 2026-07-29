@@ -11,7 +11,9 @@ una empresa, sin hacer fork ni modificar archivos core.
 - arquitectura de monolito modular basada en DDD y Clean Architecture;
 - .NET 10, Minimal APIs y Wolverine como mediator;
 - Repository Pattern y selección justificada de persistencia;
-- OpenAPI y Problem Details para features HTTP;
+- OpenAPI validado estáticamente con Redocly CLI y Problem Details para features HTTP;
+- ownership modular de errores conocidos y fallback HTTP transversal;
+- integración de código obligatoria con Azure App Configuration;
 - unit testing con xUnit, Coverlet y 80% de line coverage sobre lógica de negocio; y
 - un Definition of Done local reproducible.
 
@@ -61,9 +63,25 @@ Minimal API
 ```
 
 El Server es el composition root. Domain solo puede usar `Common.Domain`; Application depende de
-Domain; Infrastructure depende de Application y `Common.Infrastructure`; Presentation depende de
-Infrastructure y `Common.Presentation`. Consulte [Architecture](docs/architecture.md) para la
-matriz completa.
+Domain; Infrastructure depende de Application y `Common.Infrastructure`;
+`Module.Presentation` puede referenciar las capas de su propio módulo y `Common.Presentation` sin
+acceder directamente a persistencia. Consulte [Architecture](docs/architecture.md) para la matriz
+completa.
+
+`Common.Presentation` solo contiene manejo HTTP transversal y el fallback inesperado a 500. Cada
+`Module.Presentation` traduce a Problem Details los fallos conocidos de su propio módulo;
+`Common.Presentation` nunca referencia proyectos `Modules.*`.
+
+Toda aplicación generada integra en código Azure App Configuration mediante
+`Microsoft.Azure.AppConfiguration.AspNetCore`, `Azure.Identity`,
+`AddAzureAppConfiguration(...)` y `DefaultAzureCredential`, usando un endpoint suministrado por
+configuración externa. El provider remoto se registra solo cuando ese endpoint está presente, de
+modo que restore, build y unit tests locales no requieren conectividad con Azure. El provisioning
+del recurso no pertenece al preset.
+
+El versionado y despliegue del esquema físico quedan fuera de la V1. El preset no usa EF Core
+Migrations, `dotnet-ef`, snapshots ni comandos de actualización de base de datos, y tampoco
+establece `EnsureCreated()` como política alternativa.
 
 ## Install for GitHub Copilot
 
@@ -76,6 +94,10 @@ specify version
 ```
 
 El resultado debe ser `0.14.3` o superior.
+
+La validación OpenAPI requiere npm `>=10` y Node.js `>=22.12.0` o
+`>=20.19.0 <21.0.0`, según los engines publicados por Redocly CLI `2.41.1`. No instale Redocly
+globalmente ni agregue un proyecto Node a la aplicación solo para este gate.
 
 Inicialice Spec Kit con la integración oficial de GitHub Copilot y scripts PowerShell:
 
@@ -117,6 +139,16 @@ los registra para la integración activa durante la instalación.
 La CLI `0.14.3` no expone resolución de commands mediante `preset resolve`; ese subcommand resuelve
 los templates que se consultan en runtime. Los commands se componen y materializan al instalar el
 preset.
+
+Para una feature HTTP, el gate reproducible de validación estática es:
+
+```powershell
+npx --yes @redocly/cli@2.41.1 lint specs/<feature>/contracts/openapi.yaml
+```
+
+El comando debe salir con código cero. Redocly valida la estructura y las reglas OpenAPI; la
+consistencia entre contrato y endpoints implementados se comprueba separadamente durante
+`speckit.implement` y `speckit.converge`.
 
 ## Composition Strategy
 
@@ -172,11 +204,16 @@ Una feature termina únicamente cuando:
 - restore y build Release pasan con cero errores y cero warnings .NET;
 - los unit tests xUnit pasan y Coverlet demuestra al menos 80% de line coverage de lógica de
   negocio;
-- OpenAPI existe para HTTP y coincide con endpoints y errores;
+- OpenAPI existe para HTTP, Redocly CLI `2.41.1` finaliza con código cero y el contrato coincide
+  con endpoints y errores implementados;
 - DDD, las cuatro capas, sus dependencias, Repository Pattern, Wolverine mediator y Minimal APIs
   están respetados;
 - FluentValidation, Problem Details y los estándares aplicables de Serilog, OpenTelemetry,
-  HealthChecks y Azure App Configuration están cubiertos;
+  HealthChecks están cubiertos;
+- Azure App Configuration está integrado en código, aunque la conectividad y el recurso Azure no
+  sean necesarios para el DoD local;
+- los errores conocidos pertenecen a `Module.Presentation` y el fallback inesperado a
+  `Common.Presentation`;
 - no hay secretos hardcoded; y
 - `speckit.converge` finaliza sin brechas.
 
@@ -195,6 +232,8 @@ Esta V1 no genera ni ejecuta:
 - integration testing;
 - CI/CD;
 - deployment;
+- provisioning de recursos Azure;
+- versionado o despliegue del esquema físico de base de datos;
 - mensajería distribuida; ni
 - infraestructura externa.
 

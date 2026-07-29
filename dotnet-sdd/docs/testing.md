@@ -24,7 +24,6 @@ No se crean pruebas artificiales para elevar el porcentaje. Normalmente quedan f
 - DTOs sin lógica;
 - `Program.cs`;
 - configuración de dependency injection;
-- migrations;
 - código generado;
 - assembly markers;
 - bootstrap trivial;

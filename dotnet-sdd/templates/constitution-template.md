@@ -28,8 +28,10 @@ Las dependencias DEBEN apuntar en las direcciones autorizadas:
   Presentation.
 - `Infrastructure` DEBE depender de Application y `Common.Infrastructure`, y PUEDE depender de
   Domain cuando sea necesario.
-- `Presentation` DEBE depender de Infrastructure y `Common.Presentation` según la estructura de
-  referencia, pero NO PUEDE acceder directamente a persistencia.
+- `Module.Presentation` PUEDE depender de Infrastructure, Application y Domain del mismo módulo
+  cuando necesite componerlo o traducir sus fallos públicos, además de `Common.Presentation`, pero
+  NO PUEDE acceder directamente a persistencia ni referenciar capas de otro módulo.
+- `Common.Presentation` NO PUEDE referenciar ningún proyecto `Modules.<Module>.*`.
 - `<ProjectName>.Server` DEBE actuar como composition root y referenciar
   `Common.Presentation` y los proyectos `Module.Presentation`.
 
@@ -62,6 +64,12 @@ Infrastructure PUEDE usar EF Core, SQL Server, MongoDB, `DbContext` o drivers co
 requiera persistencia, `plan.md` DEBE justificar EF Core con SQL Server o EF Core con MongoDB; NO
 PUEDE elegir un motor arbitrariamente ni incorporar ambos sin necesidad.
 
+Esta V1 NO usa EF Core Migrations ni su tooling. El versionado, creación, actualización y
+despliegue del esquema físico están fuera del alcance del preset. La implementación NO PUEDE
+generar directorios de migrations, snapshots o comandos `dotnet-ef`, ni convertir
+`EnsureCreated()` en una política alternativa. Esta exclusión no elimina `DbContext`,
+configuraciones de entidades ni repositories cuando la persistencia los requiera.
+
 FluentValidation DEBE aplicarse donde exista validación de entrada o del caso de uso.
 
 Rationale: una línea base coherente permite reutilizar conocimiento y proteger los límites sin
@@ -75,10 +83,19 @@ artefactos y cerrar con consistencia entre `spec.md`, `plan.md`, OpenAPI e imple
 permite tanto diseñar el contrato antes del código como ajustarlo durante la implementación; no se
 impone contract-first.
 
-El manejo global de excepciones DEBE usar `IExceptionHandler` y `AddProblemDetails()`. Los errores
-HTTP DEBEN usar Problem Details, incluyendo errores relevantes en OpenAPI. El mapeo base es:
-validación 400, no autenticado 401, no autorizado 403, no encontrado 404, conflicto de negocio 409
-y error inesperado 500, salvo justificación funcional.
+La validación estática de ese contrato DEBE ejecutarse con Redocly CLI `2.41.1` mediante
+`npx --yes @redocly/cli@2.41.1 lint specs/<feature>/contracts/openapi.yaml` y finalizar con código
+cero. NO se permite `@latest`, una instalación global no versionada ni reemplazar este gate por
+pruebas runtime. Redocly valida estructura y reglas OpenAPI; `implement` y `converge` DEBEN
+comprobar separadamente la consistencia entre contrato e implementación.
+
+El manejo de excepciones DEBE usar `IExceptionHandler`, `AddProblemDetails()` y Problem Details en
+todos los handlers. `Common.Presentation` DEBE manejar exclusivamente el fallback inesperado o
+transversal y producir 500 sin conocer tipos de ningún módulo. Cada `Module.Presentation` DEBE
+traducir los fallos conocidos de su propio dominio y casos de uso. El mapeo base es validación 400,
+no autenticado 401, no autorizado 403, no encontrado 404 y conflicto de negocio 409, salvo
+justificación funcional. Está prohibido referenciar Domain, Application, Infrastructure o
+Presentation de un módulo desde `Common.Presentation` para resolver ese mapeo.
 
 Las respuestas NO PUEDEN exponer stack traces, connection strings, SQL, secretos, tokens o detalles
 internos sensibles. Los detalles técnicos pertenecen a observabilidad; los errores de validación
@@ -93,20 +110,29 @@ Esta etapa DEBE producir únicamente unit tests con xUnit y Coverlet. La lógica
 alcanzar al menos 80% de line coverage, priorizando Domain y Application. Los tests DEBEN probar
 comportamiento significativo; NO se generan pruebas artificiales para elevar el porcentaje.
 
-DTOs sin lógica, `Program.cs`, configuración DI, migrations, código generado, assembly markers,
-bootstrap trivial y archivos OpenAPI NO necesitan coverage artificial. Si una regla de negocio
-vive legítimamente en otra capa, DEBE probarse allí. TDD NO es obligatorio: el plan decide el orden
-de implementación y pruebas.
+DTOs sin lógica, `Program.cs`, configuración DI, código generado, assembly markers, bootstrap
+trivial y archivos OpenAPI NO necesitan coverage artificial. Si una regla de negocio vive
+legítimamente en otra capa, DEBE probarse allí. TDD NO es obligatorio: el plan decide el orden de
+implementación y pruebas.
 
 Rationale: el coverage es una señal sobre lógica con riesgo, no una meta que justifique tests sin
 valor.
 
 ### VII. Observability, Safety, and Reproducibility
 
-El plan DEBE considerar y aplicar según corresponda Serilog, OpenTelemetry, HealthChecks y Azure App
-Configuration conforme al estándar existente. Los logs y trazas NO PUEDEN incluir secretos, tokens
-o información sensible innecesaria. Esta etapa NO crea collectors, dashboards, infraestructura
-externa ni recursos Azure.
+El plan DEBE considerar y aplicar según corresponda Serilog, OpenTelemetry y HealthChecks conforme
+al estándar existente. Además, toda aplicación ASP.NET Core DEBE integrar Azure App Configuration
+en código con `Microsoft.Azure.AppConfiguration.AspNetCore`, `Azure.Identity`,
+`AddAzureAppConfiguration(...)`, un endpoint suministrado por configuración externa y
+`DefaultAzureCredential` como autenticación preferida. El provider remoto DEBE activarse solo
+cuando exista el endpoint requerido, para que restore, build y unit tests locales no dependan de
+Azure. La ausencia de conectividad o de un recurso Azure NO convierte la integración en opcional
+ni permite marcarla `N/A`. Las credenciales y connection strings hardcoded están prohibidas.
+
+`AddAzureAppConfiguration()` en servicios y `UseAzureAppConfiguration()` DEBEN agregarse solo si
+el diseño adopta refresh que los requiera; esta V1 no impone refresh complejo. Los logs y trazas NO
+PUEDEN incluir secretos, tokens o información sensible innecesaria. Esta etapa NO crea collectors,
+dashboards, infraestructura externa, recursos Azure, credenciales, secretos ni pipelines.
 
 Restore, build Release, unit tests y coverage DEBEN poder reproducirse mediante comandos
 documentados. El build Release DEBE terminar con cero errores y cero warnings .NET. No se puede
@@ -144,16 +170,20 @@ Una feature NO se considera completa hasta que:
 - `dotnet restore` y `dotnet build -c Release` pasen con cero errores y cero warnings;
 - todos los unit tests pasen y la lógica de negocio alcance 80% de line coverage con xUnit y
   Coverlet;
-- exista un OpenAPI consistente cuando exponga HTTP;
+- exista un OpenAPI consistente cuando exponga HTTP y Redocly CLI `2.41.1` finalice con código
+  cero;
 - se respeten DDD, las cuatro capas, sus dependencias, Repository Pattern, Wolverine mediator,
   Minimal APIs, FluentValidation y Problem Details;
-- los estándares aplicables de Serilog, OpenTelemetry, HealthChecks y Azure App Configuration
-  estén integrados sin secretos hardcoded; y
+- los estándares aplicables de Serilog, OpenTelemetry y HealthChecks estén cubiertos;
+- Azure App Configuration esté integrado en código sin secretos hardcoded;
+- los fallos conocidos pertenezcan a `Module.Presentation` y el fallback inesperado a
+  `Common.Presentation`; y
 - `speckit.converge` finalice sin brechas pendientes.
 
-Sonar, Veracode, SAST, DAST, performance testing, integration testing, CI/CD y deployment
-pertenecen a etapas posteriores del SDLC. Esta V1 NO genera ni ejecuta esos controles, aunque los
-requisitos de seguridad, calidad y performance DEBEN seguir especificándose cuando correspondan.
+Sonar, Veracode, SAST, DAST, performance testing, integration testing, CI/CD, deployment,
+provisioning de recursos Azure y versionado o despliegue del esquema físico pertenecen a etapas
+posteriores del SDLC. Esta V1 NO genera ni ejecuta esos controles, aunque los requisitos de
+seguridad, calidad y performance DEBEN seguir especificándose cuando correspondan.
 
 ## Governance
 
@@ -166,8 +196,9 @@ Toda excepción DEBE estar ligada a un requisito, riesgo o restricción concreta
 bloquea el Definition of Done.
 
 Los cambios DEBEN proponer motivación e impacto, actualizar la versión con Semantic Versioning y
-propagar sus efectos a templates y documentación. Un cambio incompatible en obligaciones requiere
-MAJOR; una regla o sección nueva requiere MINOR; una aclaración sin cambio normativo requiere
-PATCH. Cada revisión DEBE comprobar los principios aplicables y la evidencia local.
+propagar sus efectos a templates y documentación. Un cambio incompatible con la arquitectura o
+metodología fundamental requiere MAJOR; una capacidad compatible nueva requiere MINOR; una
+corrección o aclaración del comportamiento esperado de la V1 requiere PATCH. Cada revisión DEBE
+comprobar los principios aplicables y la evidencia local.
 
 **Version**: [CONSTITUTION_VERSION] | **Ratified**: [RATIFICATION_DATE] | **Last Amended**: [LAST_AMENDED_DATE]

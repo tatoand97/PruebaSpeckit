@@ -3,7 +3,7 @@ schema_version: "1.0"
 preset:
   id: "dotnet-sdd"
   name: ".NET SDD"
-  version: "1.0.0"
+  version: "1.0.1"
   description: "Preset SDD reutilizable para monolitos modulares greenfield en .NET 10"
   author: "Contributors"
 
