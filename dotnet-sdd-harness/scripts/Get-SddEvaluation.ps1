@@ -1,19 +1,30 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][string]$ProjectRoot
+    [Parameter(Mandatory)][string]$ProjectRoot,
+    [ValidatePattern('^[a-f0-9]{32}$')][string]$EvaluationId
 )
 
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'SddHarness.Common.ps1')
-$root = [System.IO.Path]::GetFullPath($ProjectRoot)
-$metadata = Read-JsonFile (Join-Path (Get-EvaluationRoot $root) 'evaluation.json')
-$state = Get-LatestWorkflowState $root $metadata.runId
-$guard = Read-JsonFile (Join-Path $root 'artifacts/sdd-guard/guard-result.json') -Optional
+
+$root = Resolve-SddProjectRoot $ProjectRoot
+$evaluation = Resolve-Evaluation $root $EvaluationId
+$metadata = $evaluation.Metadata
+$runId = [string](Get-PropertyValue $metadata 'runId')
+$state = if ($runId) { Get-WorkflowState $root $runId } else { $null }
+$workflowStatus = if ($state) { [string](Get-PropertyValue $state 'status') } else { 'not_started' }
+$guard = if ($workflowStatus -eq 'completed') {
+    Read-JsonFile (Join-Path $root 'artifacts/sdd-guard/guard-result.json') -Optional
+} else {
+    $null
+}
 
 [ordered]@{
-    scenarioId = $metadata.scenarioId
-    workflowId = $metadata.workflowId
-    runId = if ($state) { $state.run_id } else { $metadata.runId }
-    workflowStatus = if ($state) { $state.status } else { 'not_available' }
-    guardResult = if ($guard) { $guard.result } else { 'not_available' }
+    evaluationId = $evaluation.Id
+    evaluationStatus = [string](Get-PropertyValue $metadata 'status')
+    scenarioId = [string](Get-PropertyValue $metadata 'scenarioId')
+    workflowId = [string](Get-PropertyValue $metadata 'workflowId')
+    runId = if ($runId) { $runId } else { $null }
+    workflowStatus = $workflowStatus
+    guardResult = if ($guard) { [string](Get-PropertyValue $guard 'result') } else { 'not_available' }
 }
