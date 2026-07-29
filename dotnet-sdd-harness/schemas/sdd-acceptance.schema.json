@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/dotnet-sdd/sdd-acceptance.schema.json",
+  "title": ".NET SDD Acceptance Report",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "framework",
+    "environment",
+    "workflow",
+    "humanInteraction",
+    "sdd",
+    "guard",
+    "aiUsage",
+    "result"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "1.0" },
+    "framework": { "type": "object" },
+    "environment": { "type": "object" },
+    "workflow": {
+      "type": "object",
+      "required": ["id", "version", "runId", "status", "steps", "failedSteps", "durationSeconds"]
+    },
+    "humanInteraction": {
+      "type": "object",
+      "required": ["gatesReached", "gatesApproved", "gatesRejected", "pauses", "resumes"]
+    },
+    "sdd": { "type": "object" },
+    "guard": { "type": "object" },
+    "aiUsage": {
+      "type": "object",
+      "required": ["status"]
+    },
+    "result": {
+      "enum": ["ACCEPTED", "REJECTED", "FAILED", "INCOMPLETE"]
+    }
+  },
+  "additionalProperties": false
+}

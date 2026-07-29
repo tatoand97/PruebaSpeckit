@@ -1,0 +1,37 @@
+schema_version: "1.0"
+
+bundle:
+  id: "dotnet-sdd"
+  name: ".NET SDD Framework"
+  version: "1.0.0"
+  role: "developer"
+  description: "Distribution bundle for the governed .NET SDD preset, workflow, and deterministic Guard"
+  author: "Contributors"
+  license: "MIT"
+
+requires:
+  speckit_version: ">=0.14.3"
+  tools:
+    - "dotnet"
+    - "pwsh"
+    - "node"
+    - "npx"
+
+provides:
+  extensions:
+    - id: "dotnet-sdd-guard"
+      version: "1.0.0"
+  presets:
+    - id: "dotnet-sdd"
+      version: "1.0.1"
+      priority: 10
+      strategy: "replace"
+  workflows:
+    - id: "dotnet-sdd-feature"
+      version: "0.1.0"
+
+tags:
+  - "dotnet"
+  - "sdd"
+  - "enterprise"
+  - "copilot"
