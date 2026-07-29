@@ -3,8 +3,8 @@ schema_version: "1.0"
 workflow:
   id: "dotnet-sdd-feature"
   name: ".NET SDD Feature"
-  version: "0.1.0"
-  description: "Standard governed SDD workflow for .NET feature development using Spec Kit and dotnet-sdd."
+  version: "0.1.1"
+  description: "Standard governed SDD workflow for .NET feature development using Spec Kit and dotnet-sdd, with bounded automatic analysis."
 
 requires:
   speckit_version: ">=0.14.3"
@@ -34,14 +34,9 @@ steps:
     input:
       args: "{{ inputs.spec }}"
 
-  - id: "clarify"
-    type: command
-    command: "speckit.clarify"
-    integration: "{{ inputs.integration }}"
-
   - id: "review-spec"
     type: gate
-    message: "Revise spec.md, resuelva cualquier pregunta pendiente mostrada por speckit.clarify y confirme que la especificación representa correctamente la necesidad funcional antes de diseñar la solución."
+    message: "Revise spec.md, verifique scope y ambiguedades materiales, y no apruebe si existen preguntas funcionales relevantes. Use speckit.clarify manualmente cuando haga falta; si resuelve dudas en el mismo run pausado, apruebe este gate para continuar."
     options:
       - "approve"
       - "reject"
@@ -52,14 +47,9 @@ steps:
     command: "speckit.plan"
     integration: "{{ inputs.integration }}"
 
-  - id: "checklist"
-    type: command
-    command: "speckit.checklist"
-    integration: "{{ inputs.integration }}"
-
   - id: "review-plan"
     type: gate
-    message: "Revise plan.md, research.md, data-model.md, contracts/ y checklists/ cuando existan. ¿El diseño técnico y sus contratos están suficientemente maduros para generar el trabajo ejecutable?"
+    message: "Revise plan.md, research.md, data-model.md y contracts/ cuando existan. Verifique que el diseño y sus contratos esten suficientemente maduros para generar trabajo ejecutable. speckit.checklist sigue disponible como herramienta manual opcional cuando el operador necesite una revision formal adicional."
     options:
       - "approve"
       - "reject"
@@ -77,7 +67,7 @@ steps:
 
   - id: "review-readiness"
     type: gate
-    message: "Apruebe solo si specification, plan y tasks son consistentes y están suficientemente maduros para permitir generación o modificación de código. Si analyze reportó hallazgos bloqueantes, NO apruebe este gate. Corrija los artefactos fuente y vuelva a ejecutar el workflow."
+    message: "speckit.analyze ya fue ejecutado una vez en este run. Revise sus hallazgos antes de aprobar. Si no existen hallazgos bloqueantes, apruebe. Si existen, mantenga el workflow detenido cuando sea posible, corrija deliberadamente los artifacts correspondientes y ejecute speckit.analyze manualmente solo si decide que hace falta una nueva comprobacion."
     options:
       - "approve"
       - "reject"
@@ -95,7 +85,7 @@ steps:
 
   - id: "review-convergence"
     type: gate
-    message: "Revise el resultado de speckit.converge. Si informó \"Converged\", apruebe para finalizar. Si agregó tareas, rechace para abortar este run, complete las nuevas tasks mediante el flujo correspondiente y ejecute nuevamente el workflow o el flujo de convergencia."
+    message: "Revise el resultado de speckit.converge. Si informo Converged, apruebe para finalizar. Si agrego tareas, no dispare un retry automatico; rechace para abortar este run, complete las nuevas tasks mediante el flujo correspondiente y decida manualmente como continuar."
     options:
       - "approve"
       - "reject"
