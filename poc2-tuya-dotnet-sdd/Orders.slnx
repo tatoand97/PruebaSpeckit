@@ -1,0 +1,28 @@
+<Solution>
+  <Folder Name="/Orders/" />
+  <Folder Name="/Orders/Api/">
+    <Project Path="Orders/Api/Orders.Server/Orders.Server.csproj" />
+  </Folder>
+  <Folder Name="/Orders/Common/">
+    <Project Path="Orders/Common/Common.Domain/Common.Domain.csproj" />
+    <Project Path="Orders/Common/Common.Infrastructure/Common.Infrastructure.csproj" />
+    <Project Path="Orders/Common/Common.Presentation/Common.Presentation.csproj" />
+  </Folder>
+  <Folder Name="/Orders/Modules/" />
+  <Folder Name="/Orders/Modules/Orders/" />
+  <Folder Name="/Orders/Modules/Orders/Application/">
+    <Project Path="Orders/Modules/Orders/Application/Orders.Application.csproj" />
+  </Folder>
+  <Folder Name="/Orders/Modules/Orders/Domain/">
+    <Project Path="Orders/Modules/Orders/Domain/Orders.Domain.csproj" />
+  </Folder>
+  <Folder Name="/Orders/Modules/Orders/Infrastructure/">
+    <Project Path="Orders/Modules/Orders/Infrastructure/Orders.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/Orders/Modules/Orders/Presentation/">
+    <Project Path="Orders/Modules/Orders/Presentation/Orders.Presentation.csproj" />
+  </Folder>
+  <Folder Name="/Orders/Modules/Orders/Tests/">
+    <Project Path="Orders/Modules/Orders/Tests/Orders.Test/Orders.Test.csproj" />
+  </Folder>
+</Solution>

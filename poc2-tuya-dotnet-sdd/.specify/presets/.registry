@@ -7,9 +7,24 @@
       "manifest_hash": "sha256:70672367e6f8fcc47327c81218dd5d7b91e3326834d047f70160c76442da9c3f",
       "enabled": true,
       "priority": 10,
-      "registered_commands": {},
+      "registered_commands": {
+        "codex": [
+          "speckit.constitution",
+          "speckit.plan",
+          "speckit.tasks",
+          "speckit.implement",
+          "speckit.converge"
+        ]
+      },
       "registered_skills": {
         "copilot": [
+          "speckit-constitution",
+          "speckit-plan",
+          "speckit-tasks",
+          "speckit-implement",
+          "speckit-converge"
+        ],
+        "codex": [
           "speckit-constitution",
           "speckit-plan",
           "speckit-tasks",

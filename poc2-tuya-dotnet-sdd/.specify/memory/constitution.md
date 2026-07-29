@@ -1,4 +1,18 @@
-# [PROJECT_NAME] Constitution
+<!--
+Sync Impact Report
+- Version change: template -> 1.0.0
+- Modified principles: none; preset baseline adopted without semantic changes
+- Added sections: none
+- Removed sections: none
+- Templates requiring updates:
+  - ✅ .specify/templates/plan-template.md
+  - ✅ .specify/templates/spec-template.md
+  - ✅ .specify/templates/tasks-template.md
+- Installed command guidance reviewed:
+  - ✅ .agents/skills/speckit-*/SKILL.md
+- Follow-up TODOs: none
+-->
+# Orders Constitution
 
 ## Core Principles
 
@@ -170,4 +184,4 @@ propagar sus efectos a templates y documentación. Un cambio incompatible en obl
 MAJOR; una regla o sección nueva requiere MINOR; una aclaración sin cambio normativo requiere
 PATCH. Cada revisión DEBE comprobar los principios aplicables y la evidencia local.
 
-**Version**: [CONSTITUTION_VERSION] | **Ratified**: [RATIFICATION_DATE] | **Last Amended**: [LAST_AMENDED_DATE]
+**Version**: 1.0.0 | **Ratified**: 2026-07-29 | **Last Amended**: 2026-07-29
