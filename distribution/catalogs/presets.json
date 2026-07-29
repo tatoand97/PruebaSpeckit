@@ -1,0 +1,31 @@
+{
+  "schema_version": "1.0",
+  "updated_at": "2026-07-29T00:00:00Z",
+  "catalog_url": "https://raw.githubusercontent.com/tatoand97/PruebaSpeckit/main/distribution/catalogs/presets.json",
+  "presets": {
+    "dotnet-sdd": {
+      "name": ".NET SDD",
+      "id": "dotnet-sdd",
+      "version": "1.0.1",
+      "description": "Preset SDD reutilizable para monolitos modulares greenfield en .NET 10",
+      "author": "Contributors",
+      "repository": "https://github.com/tatoand97/PruebaSpeckit",
+      "download_url": "https://github.com/tatoand97/PruebaSpeckit/releases/download/__RELEASE_TAG__/dotnet-sdd-1.0.1.zip",
+      "requires": {
+        "speckit_version": ">=0.14.3"
+      },
+      "provides": {
+        "templates": 4,
+        "commands": 5
+      },
+      "tags": [
+        "dotnet",
+        "ddd",
+        "clean-architecture",
+        "enterprise",
+        "sdd"
+      ],
+      "sha256": "fd3ac785f754910edab26fd4e5eab8194c9ae59f11af5462c1af373e28c08e04"
+    }
+  }
+}

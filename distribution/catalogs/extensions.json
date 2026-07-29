@@ -1,0 +1,47 @@
+{
+  "schema_version": "1.0",
+  "updated_at": "2026-07-29T00:00:00Z",
+  "catalog_url": "https://raw.githubusercontent.com/tatoand97/PruebaSpeckit/main/distribution/catalogs/extensions.json",
+  "extensions": {
+    "dotnet-sdd-guard": {
+      "name": ".NET SDD Guard",
+      "id": "dotnet-sdd-guard",
+      "description": "Deterministic quality gate for mechanically verifiable dotnet-sdd controls",
+      "author": "Contributors",
+      "version": "1.0.0",
+      "download_url": "https://github.com/tatoand97/PruebaSpeckit/releases/download/__RELEASE_TAG__/dotnet-sdd-guard-1.0.0.zip",
+      "repository": "https://github.com/tatoand97/PruebaSpeckit",
+      "category": "code",
+      "effect": "read-write",
+      "requires": {
+        "speckit_version": ">=0.14.3",
+        "tools": [
+          {
+            "name": "dotnet",
+            "required": true
+          },
+          {
+            "name": "pwsh",
+            "required": true
+          },
+          {
+            "name": "npx",
+            "required": false
+          }
+        ]
+      },
+      "provides": {
+        "commands": 1,
+        "hooks": 1
+      },
+      "tags": [
+        "dotnet",
+        "quality-gate",
+        "guard",
+        "enterprise"
+      ],
+      "verified": false,
+      "sha256": "7ddde6edb1f8abfac73e292c7be01bbef3976606723083010a8af7d48f8c152e"
+    }
+  }
+}
