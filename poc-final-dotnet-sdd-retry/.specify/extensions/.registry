@@ -1,0 +1,19 @@
+{
+  "schema_version": "1.0",
+  "extensions": {
+    "dotnet-sdd-guard": {
+      "version": "1.0.0",
+      "source": "local",
+      "manifest_hash": "sha256:9af2e98591d92914adfcbaa00f21b056e4a70fef68803e75f9aa7668b85f2139",
+      "enabled": true,
+      "priority": 10,
+      "registered_commands": {
+        "codex": [
+          "speckit.dotnet-sdd-guard.verify"
+        ]
+      },
+      "registered_skills": [],
+      "installed_at": "2026-07-29T18:06:40.773218+00:00"
+    }
+  }
+}

@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <AssemblyName>ContactRequests.Server</AssemblyName>
+    <RootNamespace>ContactRequests.Server</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Serilog.AspNetCore" />
+    <PackageReference Include="WolverineFx" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../Common/Common.Infrastructure/Common.Infrastructure.csproj" />
+    <ProjectReference Include="../../Common/Common.Presentation/Common.Presentation.csproj" />
+    <ProjectReference Include="../../Modules/ContactRequests/Presentation/ContactRequests.Presentation.csproj" />
+  </ItemGroup>
+</Project>
