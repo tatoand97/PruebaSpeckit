@@ -1,6 +1,0 @@
-<Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup>
-    <AssemblyName>ContactRequests.Domain</AssemblyName>
-    <RootNamespace>ContactRequests.Domain</RootNamespace>
-  </PropertyGroup>
-</Project>

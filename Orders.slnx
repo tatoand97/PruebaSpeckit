@@ -1,5 +1,0 @@
-<Solution>
-  <Project Path="src/Orders.Api/Orders.Api.csproj" />
-  <Project Path="tests/Orders.Api.Tests/Orders.Api.Tests.csproj" />
-</Solution>
-
