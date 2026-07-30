@@ -19,7 +19,7 @@ primitive installation.
 
 ## Impact
 
-`dotnet-sdd` 1.0.1, `dotnet-sdd-feature` 0.1.1, and `dotnet-sdd-guard` 1.0.0 are local
+`dotnet-sdd` 1.0.1, `dotnet-sdd-feature` 0.1.1, and `dotnet-sdd-guard` 1.0.1 are local
 and unpublished. A clean consumer therefore cannot resolve them from the bundle ZIP.
 Preinstalling them would make a test pass only because bundle installation is
 idempotent by component ID; it would not validate the required one-step distribution.

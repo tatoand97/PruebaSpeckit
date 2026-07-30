@@ -126,8 +126,8 @@ if (@($presets.presets.PSObject.Properties).Count -ne 1 -or $presets.presets.'do
 if (@($workflows.workflows.PSObject.Properties).Count -ne 1 -or $workflows.workflows.'dotnet-sdd-feature'.version -ne '0.1.1') {
     Add-Failure 'Workflow catalog must contain only dotnet-sdd-feature 0.1.1.'
 }
-if (@($extensions.extensions.PSObject.Properties).Count -ne 1 -or $extensions.extensions.'dotnet-sdd-guard'.version -ne '1.0.0') {
-    Add-Failure 'Extension catalog must contain only dotnet-sdd-guard 1.0.0.'
+if (@($extensions.extensions.PSObject.Properties).Count -ne 1 -or $extensions.extensions.'dotnet-sdd-guard'.version -ne '1.0.1') {
+    Add-Failure 'Extension catalog must contain only dotnet-sdd-guard 1.0.1.'
 }
 if (@($bundles.bundles.PSObject.Properties).Count -ne 1 -or $bundles.bundles.'dotnet-sdd'.version -ne '1.0.1') {
     Add-Failure 'Bundle catalog must contain only dotnet-sdd 1.0.1.'
@@ -149,7 +149,7 @@ if ($workflows.workflows.'dotnet-sdd-feature'.PSObject.Properties.Name -contains
 $artifactMap = @(
     @{ Path = Join-Path $artifactRoot 'dotnet-sdd-1.0.1.zip'; Expected = $presets.presets.'dotnet-sdd'.sha256; Zip = $true }
     @{ Path = Join-Path $artifactRoot 'dotnet-sdd-feature-0.1.1.yml'; Expected = $null; Zip = $false }
-    @{ Path = Join-Path $artifactRoot 'dotnet-sdd-guard-1.0.0.zip'; Expected = $extensions.extensions.'dotnet-sdd-guard'.sha256; Zip = $true }
+    @{ Path = Join-Path $artifactRoot 'dotnet-sdd-guard-1.0.1.zip'; Expected = $extensions.extensions.'dotnet-sdd-guard'.sha256; Zip = $true }
     @{ Path = Join-Path $artifactRoot 'dotnet-sdd-bundle-1.0.1.zip'; Expected = $bundles.bundles.'dotnet-sdd'.sha256; Zip = $true }
 )
 foreach ($artifact in $artifactMap) {
@@ -218,9 +218,9 @@ with tempfile.TemporaryDirectory() as temp:
     assert installed_preset.id == "dotnet-sdd" and installed_preset.version == "1.0.1"
 
     installed_extension = ExtensionManager(project / "extension-consumer").install_from_zip(
-        artifact_root / "dotnet-sdd-guard-1.0.0.zip", "0.14.3"
+        artifact_root / "dotnet-sdd-guard-1.0.1.zip", "0.14.3"
     )
-    assert installed_extension.id == "dotnet-sdd-guard" and installed_extension.version == "1.0.0"
+    assert installed_extension.id == "dotnet-sdd-guard" and installed_extension.version == "1.0.1"
     assert "after_implement" in installed_extension.hooks
     assert installed_extension.hooks["after_implement"]["optional"] is False
 
@@ -240,7 +240,7 @@ with tempfile.TemporaryDirectory() as temp:
     assert bundle.bundle.id == "dotnet-sdd" and bundle.bundle.version == "1.0.1"
     pins = {(component.kind, component.id): component.version for component in bundle.components}
     assert pins == {
-        ("extensions", "dotnet-sdd-guard"): "1.0.0",
+        ("extensions", "dotnet-sdd-guard"): "1.0.1",
         ("presets", "dotnet-sdd"): "1.0.1",
         ("workflows", "dotnet-sdd-feature"): "0.1.1",
     }

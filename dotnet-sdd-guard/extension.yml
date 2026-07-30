@@ -3,7 +3,7 @@ schema_version: "1.0"
 extension:
   id: "dotnet-sdd-guard"
   name: ".NET SDD Guard"
-  version: "1.0.0"
+  version: "1.0.1"
   description: "Deterministic quality gate for mechanically verifiable dotnet-sdd controls"
   author: "Contributors"
   category: "code"

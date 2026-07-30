@@ -23,7 +23,7 @@ try {
     $reader = [System.IO.StreamReader]::new($manifestEntry.Open())
     try { $manifest = $reader.ReadToEnd() } finally { $reader.Dispose() }
     foreach ($pin in @(
-        'id: "dotnet-sdd-guard"', 'version: "1.0.0"',
+        'id: "dotnet-sdd-guard"', 'version: "1.0.1"',
         'id: "dotnet-sdd"', 'version: "1.0.1"',
         'id: "dotnet-sdd-feature"', 'version: "0.1.1"'
     )) {

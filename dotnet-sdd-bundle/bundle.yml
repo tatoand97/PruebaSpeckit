@@ -20,7 +20,7 @@ requires:
 provides:
   extensions:
     - id: "dotnet-sdd-guard"
-      version: "1.0.0"
+      version: "1.0.1"
   presets:
     - id: "dotnet-sdd"
       version: "1.0.1"

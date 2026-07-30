@@ -164,7 +164,7 @@ git push origin main
 gh release create $releaseTag `
   '.\distribution\artifacts\dotnet-sdd-1.0.1.zip' `
   '.\distribution\artifacts\dotnet-sdd-feature-0.1.1.yml' `
-  '.\distribution\artifacts\dotnet-sdd-guard-1.0.0.zip' `
+  '.\distribution\artifacts\dotnet-sdd-guard-1.0.1.zip' `
   '.\distribution\artifacts\dotnet-sdd-bundle-1.0.1.zip' `
   --repo tatoand97/PruebaSpeckit `
   --title '.NET SDD distribution 1.0.1' `

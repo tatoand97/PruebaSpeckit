@@ -1,6 +1,6 @@
 # .NET SDD Guard
 
-`dotnet-sdd-guard` 1.0.0 is the deterministic enforcement component for the
+`dotnet-sdd-guard` 1.0.1 is the deterministic enforcement component for the
 mechanically verifiable controls defined by `dotnet-sdd` 1.0.1. It does not judge
 business meaning, architecture trade-offs, or requirement interpretation.
 
@@ -41,6 +41,11 @@ Release build, unit tests, business coverage, Redocly 2.41.1 lint, project-refer
 direction, persistence ownership, prohibited migrations/design tooling/EnsureCreated,
 Wolverine mediator-only baseline, prohibited distributed transports, Azure App
 Configuration preparation, and Problem Details for HTTP applications.
+
+The guard stays deterministic and offline: checks are static and do not execute HTTP
+requests, contact Azure, connect to SQL Server, create migrations, or mutate source.
+OpenAPI/configuration/architecture results are mechanical and do not claim runtime
+equivalence.
 
 Repository abstraction, exception mapping, and uncertain Minimal API detection remain
 advisory where a mechanical check would be fragile.

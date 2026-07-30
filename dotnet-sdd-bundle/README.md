@@ -4,7 +4,7 @@
 
 - preset `dotnet-sdd` 1.0.1;
 - workflow `dotnet-sdd-feature` 0.1.1;
-- extension `dotnet-sdd-guard` 1.0.0.
+- extension `dotnet-sdd-guard` 1.0.1.
 
 The evaluation-only `dotnet-sdd-harness` is deliberately excluded.
 

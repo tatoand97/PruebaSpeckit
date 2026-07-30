@@ -51,6 +51,19 @@ function Get-SafeFiles {
         }
 }
 
+function Get-ImplementationFiles {
+    param([string]$Root)
+
+    $extensions = @('.cs', '.csproj', '.props', '.targets')
+    $excludedPathPattern = '[\\/](\.specify|\.github|specs|docs|artifacts|TestResults|bin|obj|\.git)[\\/]'
+
+    Get-ChildItem -LiteralPath $Root -Recurse -File -ErrorAction SilentlyContinue |
+        Where-Object {
+            $_.Extension -in $extensions -and
+            $_.FullName -notmatch $excludedPathPattern
+        }
+}
+
 function Test-AnyPattern {
     param(
         [System.IO.FileInfo[]]$Files,
@@ -113,21 +126,20 @@ function Test-Architecture {
                 'Domain' {
                     if ($targetLayer -in @('Application', 'Infrastructure', 'Presentation', 'Server')) { $bad = $true }
                     if ($targetCommon -and $targetLayer -ne 'Domain') { $bad = $true }
+                    if ($targetLayer -eq 'Domain' -and -not $targetCommon -and $targetModule -and $sourceModule -and $targetModule -ne $sourceModule) { $bad = $true }
                 }
                 'Application' {
                     if ($targetLayer -in @('Infrastructure', 'Presentation', 'Server')) { $bad = $true }
-                    if (-not $targetCommon -and $targetModule -and $sourceModule -and $targetModule -ne $sourceModule) { $bad = $true }
                 }
                 'Infrastructure' {
                     if ($targetLayer -in @('Presentation', 'Server')) { $bad = $true }
-                    if (-not $targetCommon -and $targetModule -and $sourceModule -and $targetModule -ne $sourceModule) { $bad = $true }
                 }
                 'Presentation' {
-                    if ($targetLayer -in @('Domain', 'Application', 'Server')) { $bad = $true }
-                    if (-not $targetCommon -and $targetModule -and $sourceModule -and $targetModule -ne $sourceModule) { $bad = $true }
+                    if ($targetLayer -in @('Domain', 'Infrastructure', 'Server')) { $bad = $true }
+                    if ($targetCommon -and $targetLayer -ne 'Presentation') { $bad = $true }
                 }
                 'Server' {
-                    if ($targetLayer -notin @('Presentation') -and -not ($targetCommon -and $targetLayer -eq 'Presentation')) { $bad = $true }
+                    if ($targetLayer -ne 'Presentation') { $bad = $true }
                 }
             }
             if ($bad) {
@@ -145,20 +157,190 @@ function Invoke-External {
         [string]$WorkingDirectory
     )
 
-    $outputFile = [System.IO.Path]::GetTempFileName()
-    $errorFile = [System.IO.Path]::GetTempFileName()
+    $originalLocation = Get-Location
+    $pushed = $false
+    $combinedOutput = ''
+    $exitCode = 0
     try {
-        $process = Start-Process -FilePath $FilePath -ArgumentList $Arguments -WorkingDirectory $WorkingDirectory `
-            -Wait -PassThru -NoNewWindow -RedirectStandardOutput $outputFile -RedirectStandardError $errorFile
+        if ($WorkingDirectory) {
+            Push-Location -LiteralPath $WorkingDirectory
+            $pushed = $true
+        }
+
+        $commandName = $FilePath
+        if ($FilePath -eq 'dotnet' -and -not [string]::IsNullOrWhiteSpace($env:SDD_GUARD_DOTNET_PATH)) {
+            $commandName = $env:SDD_GUARD_DOTNET_PATH
+        }
+
+        $resolvedCommand = if (Test-Path -LiteralPath $commandName -PathType Leaf) {
+            [System.IO.Path]::GetFullPath($commandName)
+        } else {
+            (Get-Command -Name $commandName -ErrorAction Stop | Select-Object -First 1).Source
+        }
+        $captured = if ([System.IO.Path]::GetExtension($resolvedCommand) -ieq '.ps1') {
+            & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File $resolvedCommand @($Arguments) 2>&1
+        } else {
+            & $resolvedCommand @($Arguments) 2>&1
+        }
+        $exitCode = $LASTEXITCODE
+        $combinedOutput = ($captured | Out-String).Trim()
+
         [ordered]@{
-            exitCode = $process.ExitCode
-            output = ((Get-Content -LiteralPath $outputFile -Raw -ErrorAction SilentlyContinue) + "`n" +
-                (Get-Content -LiteralPath $errorFile -Raw -ErrorAction SilentlyContinue))
+            exitCode = $exitCode
+            output = $combinedOutput
         }
     }
     finally {
-        Remove-Item -LiteralPath $outputFile, $errorFile -Force -ErrorAction SilentlyContinue
+        if ($pushed) {
+            Pop-Location
+        }
+        Set-Location -LiteralPath $originalLocation.Path
     }
+}
+
+function Get-ExceptionHandlers {
+    param([System.IO.FileInfo[]]$SourceFiles)
+
+    $registrations = [System.Collections.Generic.List[object]]::new()
+    $handlerDefinitions = [System.Collections.Generic.Dictionary[string, bool]]::new([System.StringComparer]::OrdinalIgnoreCase)
+
+    foreach ($file in $SourceFiles) {
+        $content = Get-Content -LiteralPath $file.FullName -Raw -ErrorAction SilentlyContinue
+        if (-not $content) { continue }
+
+        $lines = $content -split "`r?`n"
+        for ($lineIndex = 0; $lineIndex -lt $lines.Count; $lineIndex++) {
+            $line = $lines[$lineIndex]
+            $match = [regex]::Match($line, 'AddExceptionHandler\s*<\s*([^>]+)\s*>')
+            if ($match.Success) {
+                $handlerType = ($match.Groups[1].Value -replace '\s+', '')
+                $registrations.Add([ordered]@{
+                        file = $file.FullName
+                        line = $lineIndex + 1
+                        handler = $handlerType
+                    })
+            }
+        }
+
+        foreach ($classMatch in [regex]::Matches($content, 'class\s+([A-Za-z0-9_]+)\b[^\{]*IExceptionHandler')) {
+            $className = $classMatch.Groups[1].Value
+            $classStart = $classMatch.Index
+            $tail = $content.Substring($classStart)
+            $returnsTrue = $tail -match '\breturn\s+true\s*;'
+            $handlerDefinitions[$className] = $returnsTrue
+        }
+    }
+
+    return [ordered]@{
+        registrations = @($registrations | Sort-Object file, line)
+        handlerDefinitions = $handlerDefinitions
+    }
+}
+
+function Test-ExceptionHandlerOrder {
+    param([System.IO.FileInfo[]]$SourceFiles)
+
+    $handlers = Get-ExceptionHandlers $SourceFiles
+    $registrations = @($handlers.registrations)
+    $definitions = $handlers.handlerDefinitions
+
+    if ($registrations.Count -eq 0) {
+        return [ordered]@{
+            status = 'ADVISORY'
+            message = 'Could not verify IExceptionHandler registration order.'
+            evidence = 'No AddExceptionHandler<T>() calls were found in implementation files.'
+        }
+    }
+
+    $registrationFiles = @($registrations.file | Sort-Object -Unique)
+    $composed = Test-AnyPattern $SourceFiles @(
+        '\bAdd[A-Za-z0-9_]*(Presentation|Module|Exception)[A-Za-z0-9_]*\s*\(',
+        '\bMap[A-Za-z0-9_]*(Module|Presentation)[A-Za-z0-9_]*\s*\('
+    )
+
+    $specific = [System.Collections.Generic.List[object]]::new()
+    $fallback = [System.Collections.Generic.List[object]]::new()
+    foreach ($registration in $registrations) {
+        $typeName = [string]$registration.handler
+        $shortName = ($typeName -split '\.')[-1]
+        $isFallbackByName = $shortName -match '(Global|Fallback)'
+        $returnsTrue = $definitions.ContainsKey($shortName) -and $definitions[$shortName]
+        if ($isFallbackByName -or $returnsTrue) {
+            $fallback.Add($registration)
+        }
+        else {
+            $specific.Add($registration)
+        }
+    }
+
+    $certainty = ($registrationFiles.Count -eq 1) -and (-not $composed)
+    $firstSpecific = if ($specific.Count -gt 0) { $specific[0] } else { $null }
+    $firstFallback = if ($fallback.Count -gt 0) { $fallback[0] } else { $null }
+    $hasFallbackReturningTrue = @($fallback | Where-Object {
+            $typeName = (($_.handler -split '\.')[-1])
+            $definitions.ContainsKey($typeName) -and $definitions[$typeName]
+        }).Count -gt 0
+
+    if ($firstSpecific -and $firstFallback -and $hasFallbackReturningTrue) {
+        $specificFirst = $false
+        if ($firstSpecific.file -eq $firstFallback.file) {
+            $specificFirst = [int]$firstSpecific.line -lt [int]$firstFallback.line
+        }
+
+        if ($specificFirst) {
+            if ($certainty) {
+                return [ordered]@{
+                    status = 'PASS'
+                    message = 'Specific exception handlers are registered before fallback handlers.'
+                    evidence = "specific=$($firstSpecific.handler)@$($firstSpecific.line); fallback=$($firstFallback.handler)@$($firstFallback.line)"
+                }
+            }
+            return [ordered]@{
+                status = 'ADVISORY'
+                message = 'Specific handlers appear before fallback handlers, but registration flow crosses composition boundaries.'
+                evidence = "files=$($registrationFiles.Count); composed=$composed; firstSpecific=$($firstSpecific.handler); firstFallback=$($firstFallback.handler)"
+            }
+        }
+
+        if ($certainty) {
+            return [ordered]@{
+                status = 'FAIL'
+                message = 'Fallback/global exception handler is registered before a specific handler.'
+                evidence = "firstFallback=$($firstFallback.handler)@$($firstFallback.line); firstSpecific=$($firstSpecific.handler)@$($firstSpecific.line); fallbackReturnsTrue=$hasFallbackReturningTrue"
+            }
+        }
+
+        return [ordered]@{
+            status = 'ADVISORY'
+            message = 'Fallback/global handler may preempt specific handlers, but composition order could not be proven with certainty.'
+            evidence = "files=$($registrationFiles.Count); composed=$composed; fallbackReturnsTrue=$hasFallbackReturningTrue"
+        }
+    }
+
+    if ($hasFallbackReturningTrue -and $specific.Count -eq 0) {
+        return [ordered]@{
+            status = 'ADVISORY'
+            message = 'A global/fallback handler that returns true was found without detectable specific handler registrations.'
+            evidence = "fallbackRegistrations=$($fallback.Count); specificRegistrations=0"
+        }
+    }
+
+    return [ordered]@{
+        status = 'ADVISORY'
+        message = 'IExceptionHandler ordering could not be verified deterministically.'
+        evidence = "registrations=$($registrations.Count); fallback=$($fallback.Count); specific=$($specific.Count); files=$($registrationFiles.Count)"
+    }
+}
+
+function New-RunResultsRoot {
+    param([string]$Root)
+
+    $rawRoot = Join-Path $Root 'artifacts/sdd-guard/raw'
+    New-Item -ItemType Directory -Path $rawRoot -Force | Out-Null
+    $runId = Get-Date -Format 'yyyyMMddHHmmssfff'
+    $runRoot = Join-Path $rawRoot ("run-" + $runId + "-" + [guid]::NewGuid().ToString('N').Substring(0, 8))
+    New-Item -ItemType Directory -Path $runRoot -Force | Out-Null
+    return $runRoot
 }
 
 function Resolve-Solution {
@@ -246,7 +428,7 @@ function Write-GuardReport {
     $result = if ($script:ConfigurationErrors.Count -gt 0) { 'ERROR' } elseif ($failed -gt 0) { 'FAIL' } else { 'PASS' }
     $report = [ordered]@{
         schemaVersion = '1.0'
-        guard = [ordered]@{ id = 'dotnet-sdd-guard'; version = '1.0.0' }
+        guard = [ordered]@{ id = 'dotnet-sdd-guard'; version = '1.0.1' }
         result = $result
         checks = @($script:Checks)
         configurationErrors = @($script:ConfigurationErrors | ForEach-Object { 'Guard configuration or execution error.' })
@@ -292,6 +474,7 @@ try {
 
     $solution = Resolve-Solution $resolvedRoot
     $files = @(Get-SafeFiles $resolvedRoot)
+    $implementationFiles = @(Get-ImplementationFiles $resolvedRoot)
     $projects = @(Get-ChildItem -LiteralPath $resolvedRoot -Recurse -Filter '*.csproj' -File |
         Where-Object { $_.FullName -notmatch '[\\/](bin|obj|artifacts)[\\/]' })
     $http = @($projects | Where-Object { (Get-ProjectLayer $_) -in @('Presentation', 'Server') }).Count -gt 0 -or
@@ -325,14 +508,14 @@ try {
     }
 
     $migrationDirectory = @(Get-ChildItem -LiteralPath $resolvedRoot -Recurse -Directory -Filter 'Migrations' -ErrorAction SilentlyContinue |
-        Where-Object { $_.FullName -notmatch '[\\/](bin|obj|artifacts)[\\/]' }).Count -gt 0
-    $migrationFiles = @($files | Where-Object { $_.Name -match '(Migration|ModelSnapshot)\.cs$' })
+        Where-Object { $_.FullName -notmatch '[\\/](\.specify|\.github|specs|docs|artifacts|TestResults|bin|obj|\.git)[\\/]' }).Count -gt 0
+    $migrationFiles = @($implementationFiles | Where-Object { $_.Name -match '(Migration|ModelSnapshot)\.cs$' })
     $migrationPatterns = @(
         '\bdotnet-ef\b', 'Microsoft\.EntityFrameworkCore\.Design', '\bDatabase\.Migrate\s*\(',
         '\bMigrateAsync\s*\(', '\bdotnet\s+ef\s+migrations\b', '\bdotnet\s+ef\s+database\s+update\b',
         '\bEnsureCreated(?:Async)?\s*\('
     )
-    if ($migrationDirectory -or $migrationFiles.Count -gt 0 -or (Test-AnyPattern $files $migrationPatterns)) {
+    if ($migrationDirectory -or $migrationFiles.Count -gt 0 -or (Test-AnyPattern $implementationFiles $migrationPatterns)) {
         Add-Check 'MIG001' 'persistence' 'FAIL' 'HARD' 'EF Core migrations or prohibited database initialization detected.' 'At least one prohibited migration/design-time/initialization marker was found.'
     } else {
         Add-Check 'MIG001' 'persistence' 'PASS' 'HARD' 'No EF Core migrations or substitute initialization detected.' 'Prohibited markers were absent.'
@@ -392,20 +575,12 @@ try {
         Add-Check 'PERSIST002' 'persistence' 'ADVISORY' 'ADVISORY' 'No recognizable repository abstraction was found.' 'This heuristic is advisory only.'
     }
 
-    $moduleExceptions = @($files | Where-Object {
-        $_.Extension -eq '.cs' -and $_.FullName -match '[\\/]Modules[\\/].*[\\/][^\\/]*(Domain|Application)[\\/]' -and
-        (Get-Content -LiteralPath $_.FullName -Raw -ErrorAction SilentlyContinue) -match '\bclass\s+\w+Exception\b'
-    }).Count -gt 0
-    $presentationMapping = Test-AnyPattern @($files | Where-Object { $_.FullName -match '[\\/][^\\/]*Presentation[\\/]' }) @('IExceptionHandler', 'ProblemDetails', '\bException\b')
-    if ($moduleExceptions -and -not $presentationMapping) {
-        Add-Check 'EXC001' 'exceptions' 'ADVISORY' 'ADVISORY' 'Module exceptions exist without recognizable module Presentation mapping.' 'Structural heuristic only; human review remains required.'
-    } else {
-        Add-Check 'EXC001' 'exceptions' 'PASS' 'ADVISORY' 'No exception ownership advisory was detected.' 'Module exception and Presentation markers were compared.'
-    }
+    $exceptionCheck = Test-ExceptionHandlerOrder @($implementationFiles | Where-Object { $_.Extension -eq '.cs' })
+    Add-Check 'EXC001' 'exceptions' $exceptionCheck.status 'ADVISORY' $exceptionCheck.message $exceptionCheck.evidence
 
     if ($solution) {
-        $resultsRoot = Join-Path $resolvedRoot 'artifacts/sdd-guard/raw'
-        New-Item -ItemType Directory -Path $resultsRoot -Force | Out-Null
+        $resultsRoot = New-RunResultsRoot $resolvedRoot
+        $testProjectCount = 0
         if ($evidence) {
             $restoreOk = [bool]$evidence.restore
             $buildOk = [bool]$evidence.build
@@ -421,6 +596,13 @@ try {
                 ($_.BaseName -match '(^|\.)UnitTests$' -or $_.FullName -match '[\\/]UnitTests[\\/]') -and
                 $_.BaseName -notmatch '(Integration|Performance|E2E|Acceptance)'
             })
+            if ($unitTestProjects.Count -eq 0) {
+                $unitTestProjects = @($projects | Where-Object {
+                    $_.FullName -match '[\\/]tests?[\\/]' -and
+                    $_.BaseName -notmatch '(Integration|Performance|E2E|Acceptance)'
+                })
+            }
+            $testProjectCount = $unitTestProjects.Count
             $testOk = $unitTestProjects.Count -gt 0
             if (-not $testOk) {
                 Add-ConfigError 'No unambiguous UnitTests project was found.'
@@ -445,7 +627,7 @@ try {
             $(if ($buildOk) { 'Release build succeeded with warnings treated as errors.' } else { 'Release build failed or produced a .NET warning.' }) 'Build used -warnaserror; output is not exported.'
         Add-Check 'TEST001' 'tests' $(if ($testOk -and [int]$testCounts.failed -eq 0) { 'PASS' } else { 'FAIL' }) 'HARD' `
             $(if ($testOk) { 'Unit test execution succeeded.' } else { 'Unit test execution failed.' }) `
-            "executed=$($testCounts.executed); passed=$($testCounts.passed); failed=$($testCounts.failed); skipped=$($testCounts.skipped)"
+            "projects=$testProjectCount; executed=$($testCounts.executed); passed=$($testCounts.passed); failed=$($testCounts.failed); skipped=$($testCounts.skipped)"
         if ($null -eq $coverage) {
             Add-ConfigError 'Business coverage could not be calculated for Domain/Application assemblies.'
             Add-Check 'COV001' 'coverage' 'FAIL' 'HARD' 'Business line coverage could not be calculated reliably.' 'No usable Domain/Application Cobertura lines were available.'
