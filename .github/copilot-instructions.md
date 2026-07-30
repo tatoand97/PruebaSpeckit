@@ -15,3 +15,29 @@
 - Do not use multi-agent execution or parallelization by default. Reserve subagents for specialized work or work that is genuinely parallelizable.
 - Keep the context sent to the model as small as reasonably possible.
 - After code changes, run the applicable build and tests before considering the task complete.
+- Repository exploration policy
+
+	For structural questions about this repository, prefer codebase-memory-mcp before broad grep, glob, or file traversal.
+	Use it for architecture discovery, symbol search, callers/callees, implementation relationships, dependency impact, HTTP route relationships, and locating candidate files.
+	After locating candidate code with the graph, read the actual source files before editing.
+	Never modify code solely from graph-derived information.
+
+- External documentation policy
+
+	Use Context7 only when current external library or API documentation is required.
+	Typical cases include unfamiliar or version-sensitive APIs, package configuration, framework integration, APIs that may have changed, or build/runtime issues caused by package usage.
+	Do not call Context7 for business requirements, project-local architecture already documented, ordinary repository navigation, or information already available in local source or docs.
+
+- Context discipline
+
+	Do not retrieve context merely because an MCP tool exists.
+	Use the smallest sufficient context.
+	Prefer graph query -> identify candidate symbols/files -> read only relevant files over recursive repository search and manual architecture inference.
+	Do not call both repository search and codebase-memory for the same question unless the graph result is insufficient or needs verification.
+
+- SDD integration policy
+
+	For specify and review-spec, keep Context7 and codebase-memory off by default.
+	For plan and review-plan, use codebase-memory for brownfield work and Context7 only when external API or library knowledge is needed.
+	For tasks and implement, use codebase-memory first for brownfield discovery, then read source before editing; use Context7 only when documentation is actually required.
+	For analyze and converge, use codebase-memory for impact and gap discovery, and keep Context7 normally off unless an external library question is part of the task.

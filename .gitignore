@@ -12,4 +12,8 @@ Thumbs.db
 .local/
 TestResults/
 *.trx
+.vscode/
+!.vscode/
+.vscode/*
+!.vscode/mcp.json
 
