@@ -9,9 +9,9 @@ Readiness: **NOT READY**
 | Component | Version | Artifact | SHA-256 | URL |
 |---|---:|---|---|---|
 | `dotnet-sdd` | 1.0.1 | `artifacts/dotnet-sdd-1.0.1.zip` | `fd3ac785f754910edab26fd4e5eab8194c9ae59f11af5462c1af373e28c08e04` | `https://github.com/tatoand97/PruebaSpeckit/releases/download/__RELEASE_TAG__/dotnet-sdd-1.0.1.zip` |
-| `dotnet-sdd-feature` | 0.1.1 | `artifacts/dotnet-sdd-feature-0.1.1.yml` | `__PENDING_SHA256__` | `https://github.com/tatoand97/PruebaSpeckit/releases/download/__RELEASE_TAG__/dotnet-sdd-feature-0.1.1.yml` |
+| `dotnet-sdd-feature` | 0.1.1 | `artifacts/dotnet-sdd-feature-0.1.1.yml` | `e093f9f0f9590688cdfc387cfba8831ef6004261780c41fc305dcc0e45541331` | `https://github.com/tatoand97/PruebaSpeckit/releases/download/__RELEASE_TAG__/dotnet-sdd-feature-0.1.1.yml` |
 | `dotnet-sdd-guard` | 1.0.0 | `artifacts/dotnet-sdd-guard-1.0.0.zip` | `7ddde6edb1f8abfac73e292c7be01bbef3976606723083010a8af7d48f8c152e` | `https://github.com/tatoand97/PruebaSpeckit/releases/download/__RELEASE_TAG__/dotnet-sdd-guard-1.0.0.zip` |
-| `dotnet-sdd-bundle` | 1.0.1 | `artifacts/dotnet-sdd-bundle-1.0.1.zip` | `__PENDING_SHA256__` | `https://github.com/tatoand97/PruebaSpeckit/releases/download/__RELEASE_TAG__/dotnet-sdd-bundle-1.0.1.zip` |
+| `dotnet-sdd-bundle` | 1.0.1 | `artifacts/dotnet-sdd-bundle-1.0.1.zip` | `7aec15efa846b11ddc718ef7378f60a0fc4c9df43d3fe3f6cacb9a82a2e9b875` | `https://github.com/tatoand97/PruebaSpeckit/releases/download/__RELEASE_TAG__/dotnet-sdd-bundle-1.0.1.zip` |
 
 The Preset and Extension ZIPs were rebuilt twice with fixed entry timestamps, stable
 path ordering, and identical hashes. The Workflow is the original `workflow.yml`
