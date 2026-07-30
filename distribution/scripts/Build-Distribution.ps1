@@ -110,14 +110,14 @@ Assert-SpecKitVersion
 New-Item -ItemType Directory -Path $artifactRoot -Force | Out-Null
 
 $presetArtifact = Join-Path $artifactRoot 'dotnet-sdd-1.0.1.zip'
-$workflowArtifact = Join-Path $artifactRoot 'dotnet-sdd-feature-0.1.0.yml'
+$workflowArtifact = Join-Path $artifactRoot 'dotnet-sdd-feature-0.1.1.yml'
 $extensionArtifact = Join-Path $artifactRoot 'dotnet-sdd-guard-1.0.0.zip'
-$bundleArtifact = Join-Path $artifactRoot 'dotnet-sdd-1.0.0.zip'
+$bundleArtifact = Join-Path $artifactRoot 'dotnet-sdd-bundle-1.0.1.zip'
 
 New-DeterministicZip -SourceRoot (Join-Path $repoRoot 'dotnet-sdd') -Destination $presetArtifact
 Copy-Item -LiteralPath (Join-Path $repoRoot 'dotnet-sdd-feature\workflow.yml') -Destination $workflowArtifact -Force
 New-DeterministicZip -SourceRoot (Join-Path $repoRoot 'dotnet-sdd-guard') -Destination $extensionArtifact
-Copy-Item -LiteralPath (Join-Path $repoRoot 'dotnet-sdd-bundle\dist\dotnet-sdd-1.0.0.zip') -Destination $bundleArtifact -Force
+Copy-Item -LiteralPath (Join-Path $repoRoot 'dotnet-sdd-bundle\dist\dotnet-sdd-1.0.1.zip') -Destination $bundleArtifact -Force
 
 $firstPresetHash = (Get-FileHash -LiteralPath $presetArtifact -Algorithm SHA256).Hash.ToLowerInvariant()
 $firstExtensionHash = (Get-FileHash -LiteralPath $extensionArtifact -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -149,7 +149,7 @@ Set-CatalogValue -Path (Join-Path $catalogRoot 'presets.json') -Mutation {
 }
 Set-CatalogValue -Path (Join-Path $catalogRoot 'workflows.json') -Mutation {
     param($catalog)
-    $catalog.workflows.'dotnet-sdd-feature'.url = "$releaseBase/dotnet-sdd-feature-0.1.0.yml"
+    $catalog.workflows.'dotnet-sdd-feature'.url = "$releaseBase/dotnet-sdd-feature-0.1.1.yml"
 }
 Set-CatalogValue -Path (Join-Path $catalogRoot 'extensions.json') -Mutation {
     param($catalog)
@@ -158,15 +158,15 @@ Set-CatalogValue -Path (Join-Path $catalogRoot 'extensions.json') -Mutation {
 }
 Set-CatalogValue -Path (Join-Path $catalogRoot 'bundles.json') -Mutation {
     param($catalog)
-    $catalog.bundles.'dotnet-sdd'.download_url = "$releaseBase/dotnet-sdd-1.0.0.zip"
+    $catalog.bundles.'dotnet-sdd'.download_url = "$releaseBase/dotnet-sdd-bundle-1.0.1.zip"
     $catalog.bundles.'dotnet-sdd'.sha256 = $bundleHash
 }
 
 @(
     [pscustomobject]@{ Component = 'dotnet-sdd'; Version = '1.0.1'; Artifact = $presetArtifact; SHA256 = $firstPresetHash }
-    [pscustomobject]@{ Component = 'dotnet-sdd-feature'; Version = '0.1.0'; Artifact = $workflowArtifact; SHA256 = $workflowHash }
+    [pscustomobject]@{ Component = 'dotnet-sdd-feature'; Version = '0.1.1'; Artifact = $workflowArtifact; SHA256 = $workflowHash }
     [pscustomobject]@{ Component = 'dotnet-sdd-guard'; Version = '1.0.0'; Artifact = $extensionArtifact; SHA256 = $firstExtensionHash }
-    [pscustomobject]@{ Component = 'dotnet-sdd-bundle'; Version = '1.0.0'; Artifact = $bundleArtifact; SHA256 = $bundleHash }
+    [pscustomobject]@{ Component = 'dotnet-sdd-bundle'; Version = '1.0.1'; Artifact = $bundleArtifact; SHA256 = $bundleHash }
 ) | Format-Table -AutoSize
 
 if ($ReleaseTag -eq '__RELEASE_TAG__') {

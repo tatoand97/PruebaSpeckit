@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$ArtifactPath = (Join-Path $PSScriptRoot '../dist/dotnet-sdd-1.0.0.zip')
+    [string]$ArtifactPath = (Join-Path $PSScriptRoot '../dist/dotnet-sdd-1.0.1.zip')
 )
 
 $ErrorActionPreference = 'Stop'
@@ -25,7 +25,7 @@ try {
     foreach ($pin in @(
         'id: "dotnet-sdd-guard"', 'version: "1.0.0"',
         'id: "dotnet-sdd"', 'version: "1.0.1"',
-        'id: "dotnet-sdd-feature"', 'version: "0.1.0"'
+        'id: "dotnet-sdd-feature"', 'version: "0.1.1"'
     )) {
         if ($manifest -notmatch [regex]::Escape($pin)) { throw "Missing pinned component declaration." }
     }

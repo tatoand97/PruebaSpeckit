@@ -3,7 +3,7 @@ schema_version: "1.0"
 bundle:
   id: "dotnet-sdd"
   name: ".NET SDD Framework"
-  version: "1.0.0"
+  version: "1.0.1"
   role: "developer"
   description: "Distribution bundle for the governed .NET SDD preset, workflow, and deterministic Guard"
   author: "Contributors"
@@ -28,7 +28,7 @@ provides:
       strategy: "replace"
   workflows:
     - id: "dotnet-sdd-feature"
-      version: "0.1.0"
+      version: "0.1.1"
 
 tags:
   - "dotnet"

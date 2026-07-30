@@ -89,10 +89,10 @@ through their active catalogs:
 
 ```powershell
 Invoke-WebRequest `
-  -Uri 'https://github.com/tatoand97/PruebaSpeckit/releases/download/<RELEASE_TAG>/dotnet-sdd-1.0.0.zip' `
-  -OutFile '.\dotnet-sdd-1.0.0.zip'
+  -Uri 'https://github.com/tatoand97/PruebaSpeckit/releases/download/<RELEASE_TAG>/dotnet-sdd-1.0.1.zip' `
+  -OutFile '.\dotnet-sdd-1.0.1.zip'
 
-specify bundle install '.\dotnet-sdd-1.0.0.zip' --integration copilot
+specify bundle install '.\dotnet-sdd-1.0.1.zip' --integration copilot
 ```
 
 Neither variant embeds or installs the Harness.
@@ -152,7 +152,7 @@ These commands are prepared for a later explicitly authorized publication. They 
 not been executed:
 
 ```powershell
-$releaseTag = 'dotnet-sdd-distribution-v1.0.0'
+$releaseTag = 'dotnet-sdd-distribution-v1.0.1'
 
 .\distribution\scripts\Build-Distribution.ps1 -ReleaseTag $releaseTag
 .\distribution\scripts\Test-Catalogs.ps1
@@ -163,11 +163,11 @@ git push origin main
 
 gh release create $releaseTag `
   '.\distribution\artifacts\dotnet-sdd-1.0.1.zip' `
-  '.\distribution\artifacts\dotnet-sdd-feature-0.1.0.yml' `
+  '.\distribution\artifacts\dotnet-sdd-feature-0.1.1.yml' `
   '.\distribution\artifacts\dotnet-sdd-guard-1.0.0.zip' `
-  '.\distribution\artifacts\dotnet-sdd-1.0.0.zip' `
+  '.\distribution\artifacts\dotnet-sdd-bundle-1.0.1.zip' `
   --repo tatoand97/PruebaSpeckit `
-  --title '.NET SDD distribution 1.0.0' `
+  --title '.NET SDD distribution 1.0.1' `
   --notes 'Versioned Spec Kit catalogs and immutable .NET SDD artifacts.'
 
 .\distribution\scripts\Test-CleanInstall.ps1 -IgnoreAgentTools

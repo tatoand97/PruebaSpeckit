@@ -6,12 +6,12 @@
     "dotnet-sdd": {
       "name": ".NET SDD Framework",
       "id": "dotnet-sdd",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "role": "developer",
       "description": "Distribution bundle for the governed .NET SDD preset, workflow, and deterministic Guard",
       "author": "Contributors",
       "license": "MIT",
-      "download_url": "https://github.com/tatoand97/PruebaSpeckit/releases/download/__RELEASE_TAG__/dotnet-sdd-1.0.0.zip",
+      "download_url": "https://github.com/tatoand97/PruebaSpeckit/releases/download/__RELEASE_TAG__/dotnet-sdd-bundle-1.0.1.zip",
       "repository": "https://github.com/tatoand97/PruebaSpeckit",
       "requires": {
         "speckit_version": ">=0.14.3"
@@ -29,7 +29,7 @@
         "copilot"
       ],
       "verified": false,
-      "sha256": "e6eacf72d74298eb707cdfe35a69451e13a0f2fccded1e564b63829f0fb43ef7"
+      "sha256": "7aec15efa846b11ddc718ef7378f60a0fc4c9df43d3fe3f6cacb9a82a2e9b875"
     }
   }
 }

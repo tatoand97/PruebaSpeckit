@@ -1,9 +1,9 @@
 # .NET SDD Framework Bundle
 
-`dotnet-sdd` 1.0.0 is the distribution layer for exactly:
+`dotnet-sdd` 1.0.1 is the distribution layer for exactly:
 
 - preset `dotnet-sdd` 1.0.1;
-- workflow `dotnet-sdd-feature` 0.1.0;
+- workflow `dotnet-sdd-feature` 0.1.1;
 - extension `dotnet-sdd-guard` 1.0.0.
 
 The evaluation-only `dotnet-sdd-harness` is deliberately excluded.
@@ -18,13 +18,13 @@ After the three pinned components have been published to active Spec Kit compone
 catalogs, the official one-step installation is:
 
 ```powershell
-specify bundle install "./dotnet-sdd-1.0.0.zip" --integration copilot
+specify bundle install "./dotnet-sdd-1.0.1.zip" --integration copilot
 ```
 
 For a directory that is not yet a Spec Kit project:
 
 ```powershell
-specify bundle init "./dotnet-sdd-1.0.0.zip" --integration copilot
+specify bundle init "./dotnet-sdd-1.0.1.zip" --integration copilot
 ```
 
 Initialize the Constitution once through the materialized `speckit.constitution`

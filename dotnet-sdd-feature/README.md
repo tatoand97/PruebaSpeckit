@@ -163,7 +163,7 @@ dotnet-sdd
 dotnet-sdd-feature
     = sequence and orchestration
 
-future dotnet-sdd-guard
+dotnet-sdd-guard
     = deterministic enforcement
 ```
 
