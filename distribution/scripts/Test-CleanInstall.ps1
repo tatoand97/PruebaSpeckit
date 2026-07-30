@@ -49,10 +49,10 @@ if ($LocalDistributionRoot) {
                 $document.workflows.'dotnet-sdd-feature'.url = "$localBase/artifacts/dotnet-sdd-feature-0.1.1.yml"
             }
             'extensions.json' {
-                $document.extensions.'dotnet-sdd-guard'.download_url = "$localBase/artifacts/dotnet-sdd-guard-1.0.1.zip"
+                $document.extensions.'dotnet-sdd-guard'.download_url = "$localBase/artifacts/dotnet-sdd-guard-1.0.2.zip"
             }
             'bundles.json' {
-                $document.bundles.'dotnet-sdd'.download_url = "$localBase/artifacts/dotnet-sdd-bundle-1.0.1.zip"
+                $document.bundles.'dotnet-sdd'.download_url = "$localBase/artifacts/dotnet-sdd-bundle-1.0.2.zip"
             }
         }
         [IO.File]::WriteAllText(
@@ -166,7 +166,7 @@ try {
 
     if ($presetManifest -notmatch '(?m)^\s*version:\s*"?1\.0\.1"?\s*$') { throw 'Installed preset version is not 1.0.1.' }
     if ($workflowManifest -notmatch '(?m)^\s*version:\s*"?0\.1\.1"?\s*$') { throw 'Installed workflow version is not 0.1.1.' }
-    if ($extensionManifest -notmatch '(?m)^\s*version:\s*"?1\.0\.1"?\s*$') { throw 'Installed extension version is not 1.0.1.' }
+    if ($extensionManifest -notmatch '(?m)^\s*version:\s*"?1\.0\.2"?\s*$') { throw 'Installed extension version is not 1.0.2.' }
     if ($extensionManifest -notmatch '(?ms)after_implement:.*?optional:\s*false') { throw 'Mandatory after_implement hook is missing.' }
     if (-not (Test-Path -LiteralPath (Join-Path $bundleConsumer '.specify\extensions\dotnet-sdd-guard\scripts\Invoke-SddGuard.ps1'))) {
         throw 'Guard script was not installed.'
@@ -175,8 +175,8 @@ try {
         throw 'Copilot skill materialization was not found.'
     }
     $record = @($bundleRecords.bundles | Where-Object bundle_id -eq 'dotnet-sdd')
-    if ($record.Count -ne 1 -or $record[0].version -ne '1.0.1') {
-        throw 'Bundle provenance for dotnet-sdd 1.0.1 was not recorded.'
+    if ($record.Count -ne 1 -or $record[0].version -ne '1.0.2') {
+        throw 'Bundle provenance for dotnet-sdd 1.0.2 was not recorded.'
     }
 
     if ($isLoopback) {

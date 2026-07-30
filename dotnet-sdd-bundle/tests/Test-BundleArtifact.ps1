@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$ArtifactPath = (Join-Path $PSScriptRoot '../dist/dotnet-sdd-1.0.1.zip')
+    [string]$ArtifactPath = (Join-Path $PSScriptRoot '../dist/dotnet-sdd-1.0.2.zip')
 )
 
 $ErrorActionPreference = 'Stop'
@@ -23,7 +23,7 @@ try {
     $reader = [System.IO.StreamReader]::new($manifestEntry.Open())
     try { $manifest = $reader.ReadToEnd() } finally { $reader.Dispose() }
     foreach ($pin in @(
-        'id: "dotnet-sdd-guard"', 'version: "1.0.1"',
+        'id: "dotnet-sdd-guard"', 'version: "1.0.2"',
         'id: "dotnet-sdd"', 'version: "1.0.1"',
         'id: "dotnet-sdd-feature"', 'version: "0.1.1"'
     )) {

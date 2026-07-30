@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.2
+
+- Promoted EXC001 to an effective gate by mapping proven PASS/FAIL to HARD severity and preserving ADVISORY/NONE for uncertain or non-applicable cases.
+- Hardened PERSIST002 to scan only implementation `.cs` files, avoiding false PASS results from documentation markers.
+- Expanded regression coverage with realistic `IExceptionHandler` fixtures, deterministic EXC001 exit-code assertions, and PERSIST002 documentation false-positive protection.
+
 ## 1.0.1
 
 - Corrected ARCH001 dependency-direction rules to align with module Clean Architecture.

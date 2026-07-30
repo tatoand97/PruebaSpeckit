@@ -251,8 +251,14 @@ function Get-ExceptionHandlers {
 
             $classBody = $content.Substring($openingBrace, $classEnd - $openingBrace + 1)
             $handlerDefinitions[$className] = [ordered]@{
-                returnTrue  = ($classBody -match '\breturn\s+true\s*;')
-                returnFalse = ($classBody -match '\breturn\s+false\s*;')
+                returnTrue  = (
+                    ($classBody -match '\breturn\s+true\s*;') -or
+                    ($classBody -match '\breturn\s+(?:ValueTask|Task)\.FromResult\s*\(\s*true\s*\)\s*;')
+                )
+                returnFalse = (
+                    ($classBody -match '\breturn\s+false\s*;') -or
+                    ($classBody -match '\breturn\s+(?:ValueTask|Task)\.FromResult\s*\(\s*false\s*\)\s*;')
+                )
             }
         }
     }
@@ -280,7 +286,7 @@ function Test-ExceptionHandlerOrder {
 
     $registrationFiles = @($registrations.file | Sort-Object -Unique)
     $composed = Test-AnyPattern $SourceFiles @(
-        '\bAdd[A-Za-z0-9_]*(Presentation|Module|Exception)[A-Za-z0-9_]*\s*\(',
+        '\bAdd(?!ExceptionHandler\b)[A-Za-z0-9_]*(Presentation|Module|Exception)[A-Za-z0-9_]*\s*\(',
         '\bMap[A-Za-z0-9_]*(Module|Presentation)[A-Za-z0-9_]*\s*\('
     )
 
@@ -360,6 +366,18 @@ function Test-ExceptionHandlerOrder {
         status = 'ADVISORY'
         message = 'IExceptionHandler ordering could not be verified deterministically.'
         evidence = "registrations=$($registrations.Count); fallback=$($fallback.Count); specific=$($specific.Count); files=$($registrationFiles.Count)"
+    }
+}
+
+function Get-Exc001Severity {
+    param([string]$Status)
+
+    switch ($Status) {
+        'PASS' { return 'HARD' }
+        'FAIL' { return 'HARD' }
+        'ADVISORY' { return 'ADVISORY' }
+        'NOT_APPLICABLE' { return 'NONE' }
+        default { return 'ADVISORY' }
     }
 }
 
@@ -459,7 +477,7 @@ function Write-GuardReport {
     $result = if ($script:ConfigurationErrors.Count -gt 0) { 'ERROR' } elseif ($failed -gt 0) { 'FAIL' } else { 'PASS' }
     $report = [ordered]@{
         schemaVersion = '1.0'
-        guard = [ordered]@{ id = 'dotnet-sdd-guard'; version = '1.0.1' }
+        guard = [ordered]@{ id = 'dotnet-sdd-guard'; version = '1.0.2' }
         result = $result
         checks = @($script:Checks)
         configurationErrors = @($script:ConfigurationErrors | ForEach-Object { 'Guard configuration or execution error.' })
@@ -599,7 +617,7 @@ try {
         }
     }
 
-    $repositoryMarker = Test-AnyPattern $files @('\bI[A-Za-z0-9]+Repository\b', '\bRepository\b')
+    $repositoryMarker = Test-AnyPattern @($implementationFiles | Where-Object { $_.Extension -eq '.cs' }) @('\bI[A-Za-z0-9]+Repository\b', '\bRepository\b')
     if ($repositoryMarker) {
         Add-Check 'PERSIST002' 'persistence' 'PASS' 'ADVISORY' 'Repository abstraction marker is present.' 'A conventional repository marker was found.'
     } else {
@@ -607,7 +625,8 @@ try {
     }
 
     $exceptionCheck = Test-ExceptionHandlerOrder @($implementationFiles | Where-Object { $_.Extension -eq '.cs' })
-    Add-Check 'EXC001' 'exceptions' $exceptionCheck.status 'ADVISORY' $exceptionCheck.message $exceptionCheck.evidence
+    $exceptionSeverity = Get-Exc001Severity $exceptionCheck.status
+    Add-Check 'EXC001' 'exceptions' $exceptionCheck.status $exceptionSeverity $exceptionCheck.message $exceptionCheck.evidence
 
     if ($solution) {
         $resultsRoot = New-RunResultsRoot $resolvedRoot

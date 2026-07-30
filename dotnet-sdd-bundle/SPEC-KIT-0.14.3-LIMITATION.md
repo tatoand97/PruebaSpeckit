@@ -19,7 +19,7 @@ primitive installation.
 
 ## Impact
 
-`dotnet-sdd` 1.0.1, `dotnet-sdd-feature` 0.1.1, and `dotnet-sdd-guard` 1.0.1 are local
+`dotnet-sdd` 1.0.1, `dotnet-sdd-feature` 0.1.1, and `dotnet-sdd-guard` 1.0.2 are local
 and unpublished. A clean consumer therefore cannot resolve them from the bundle ZIP.
 Preinstalling them would make a test pass only because bundle installation is
 idempotent by component ID; it would not validate the required one-step distribution.
@@ -33,7 +33,7 @@ Then:
 ```powershell
 specify bundle validate --path "./dotnet-sdd-bundle"
 specify bundle build --path "./dotnet-sdd-bundle" --output "./dotnet-sdd-bundle/dist"
-specify bundle init "./dotnet-sdd-bundle/dist/dotnet-sdd-1.0.1.zip" --integration copilot
+specify bundle init "./dotnet-sdd-bundle/dist/dotnet-sdd-1.0.2.zip" --integration copilot
 ```
 
 No changes to the frozen preset or workflow are required. No absolute path, `file://`

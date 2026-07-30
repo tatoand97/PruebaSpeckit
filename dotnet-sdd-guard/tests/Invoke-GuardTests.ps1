@@ -349,34 +349,64 @@ try {
         Write-Utf8 (Join-Path $r 'src/App.Server/Program.cs') @'
 services.AddExceptionHandler<SalesKnownExceptionHandler>();
 services.AddExceptionHandler<GlobalFallbackExceptionHandler>();
-public sealed class SalesKnownExceptionHandler : IExceptionHandler { }
+public sealed class SalesKnownException : Exception { }
+public sealed class SalesKnownExceptionHandler : IExceptionHandler {
+    public ValueTask<bool> TryHandleAsync(HttpContext context, Exception exception, CancellationToken cancellationToken) {
+        if (exception is not SalesKnownException) {
+            return ValueTask.FromResult(false);
+        }
+
+        return ValueTask.FromResult(true);
+    }
+}
 public sealed class GlobalFallbackExceptionHandler : IExceptionHandler {
-    public bool TryHandleAsync(HttpContext context, Exception ex, CancellationToken token) {
-        return true;
+    public ValueTask<bool> TryHandleAsync(HttpContext context, Exception exception, CancellationToken cancellationToken) {
+        context.Response.StatusCode = 500;
+        return ValueTask.FromResult(true);
     }
 }
 opts.DurabilityMode = DurabilityMode.MediatorOnly;
 builder.Configuration.AddAzureAppConfiguration(o => o.Connect(new Uri(config["AppConfigEndpoint"]), new DefaultAzureCredential()));
 services.AddProblemDetails();
 '@
-    } -UseEvidence -ExpectedExit 0 -CheckId 'EXC001' -ExpectedStatuses @('PASS')
+    } -UseEvidence -ExpectedExit 0 -CheckId 'EXC001' -ExpectedStatuses @('PASS') -ExtraAssert {
+        param($r, $report, $check)
+        if ($check.severity -ne 'HARD') {
+            throw "EXC001 PASS must be HARD but got $($check.severity)."
+        }
+    }
 
-    Assert-Case 'exc-global-before-specific-alert' {
+    Assert-Case 'exc-global-before-specific-fail' {
         param($r)
         Write-Utf8 (Join-Path $r 'src/App.Server/Program.cs') @'
 services.AddExceptionHandler<GlobalFallbackExceptionHandler>();
 services.AddExceptionHandler<SalesKnownExceptionHandler>();
-public sealed class SalesKnownExceptionHandler : IExceptionHandler { }
+public sealed class SalesKnownException : Exception { }
+public sealed class SalesKnownExceptionHandler : IExceptionHandler {
+    public ValueTask<bool> TryHandleAsync(HttpContext context, Exception exception, CancellationToken cancellationToken) {
+        if (exception is not SalesKnownException) {
+            return ValueTask.FromResult(false);
+        }
+
+        return ValueTask.FromResult(true);
+    }
+}
 public sealed class GlobalFallbackExceptionHandler : IExceptionHandler {
-    public bool TryHandleAsync(HttpContext context, Exception ex, CancellationToken token) {
-        return true;
+    public ValueTask<bool> TryHandleAsync(HttpContext context, Exception exception, CancellationToken cancellationToken) {
+        context.Response.StatusCode = 500;
+        return ValueTask.FromResult(true);
     }
 }
 opts.DurabilityMode = DurabilityMode.MediatorOnly;
 builder.Configuration.AddAzureAppConfiguration(o => o.Connect(new Uri(config["AppConfigEndpoint"]), new DefaultAzureCredential()));
 services.AddProblemDetails();
 '@
-    } -UseEvidence -ExpectedExit 0 -CheckId 'EXC001' -ExpectedStatuses @('FAIL', 'ADVISORY')
+    } -UseEvidence -ExpectedExit 1 -CheckId 'EXC001' -ExpectedStatuses @('FAIL') -ExtraAssert {
+        param($r, $report, $check)
+        if ($check.severity -ne 'HARD') {
+            throw "EXC001 FAIL must be HARD but got $($check.severity)."
+        }
+    }
 
     Assert-Case 'exc-guarded-specific-remains-specific' {
         param($r)
@@ -385,23 +415,75 @@ services.AddExceptionHandler<GlobalFallbackExceptionHandler>();
 services.AddExceptionHandler<SalesKnownExceptionHandler>();
 public sealed class SalesKnownException : Exception { }
 public sealed class SalesKnownExceptionHandler : IExceptionHandler {
-    public bool TryHandleAsync(HttpContext context, Exception exception, CancellationToken token) {
+    public ValueTask<bool> TryHandleAsync(HttpContext context, Exception exception, CancellationToken cancellationToken) {
         if (exception is not SalesKnownException) {
-            return false;
+            return ValueTask.FromResult(false);
         }
-        return true;
+        return ValueTask.FromResult(true);
     }
 }
 public sealed class GlobalFallbackExceptionHandler : IExceptionHandler {
-    public bool TryHandleAsync(HttpContext context, Exception ex, CancellationToken token) {
-        return true;
+    public ValueTask<bool> TryHandleAsync(HttpContext context, Exception exception, CancellationToken cancellationToken) {
+        context.Response.StatusCode = 500;
+        return ValueTask.FromResult(true);
     }
 }
 opts.DurabilityMode = DurabilityMode.MediatorOnly;
 builder.Configuration.AddAzureAppConfiguration(o => o.Connect(new Uri(config["AppConfigEndpoint"]), new DefaultAzureCredential()));
 services.AddProblemDetails();
 '@
-    } -UseEvidence -ExpectedExit 0 -CheckId 'EXC001' -ExpectedStatuses @('FAIL')
+    } -UseEvidence -ExpectedExit 1 -CheckId 'EXC001' -ExpectedStatuses @('FAIL') -ExtraAssert {
+        param($r, $report, $check)
+        if ($check.severity -ne 'HARD') {
+            throw "EXC001 FAIL must be HARD but got $($check.severity)."
+        }
+    }
+
+    Assert-Case 'exc-order-uncertain-advisory' {
+        param($r)
+        Write-Utf8 (Join-Path $r 'src/Modules/Sales/Sales.Presentation/ExceptionRegistration.cs') @'
+public static class ExceptionRegistration {
+    public static IServiceCollection AddSalesPresentation(this IServiceCollection services) {
+        services.AddExceptionHandler<GlobalFallbackExceptionHandler>();
+        services.AddExceptionHandler<SalesKnownExceptionHandler>();
+        return services;
+    }
+}
+public sealed class SalesKnownException : Exception { }
+public sealed class SalesKnownExceptionHandler : IExceptionHandler {
+    public ValueTask<bool> TryHandleAsync(HttpContext context, Exception exception, CancellationToken cancellationToken) {
+        if (exception is not SalesKnownException) {
+            return ValueTask.FromResult(false);
+        }
+
+        return ValueTask.FromResult(true);
+    }
+}
+public sealed class GlobalFallbackExceptionHandler : IExceptionHandler {
+    public ValueTask<bool> TryHandleAsync(HttpContext context, Exception exception, CancellationToken cancellationToken) {
+        context.Response.StatusCode = 500;
+        return ValueTask.FromResult(true);
+    }
+}
+'@
+        Write-Utf8 (Join-Path $r 'src/App.Server/Program.cs') @'
+services.AddSalesPresentation();
+opts.DurabilityMode = DurabilityMode.MediatorOnly;
+builder.Configuration.AddAzureAppConfiguration(o => o.Connect(new Uri(config["AppConfigEndpoint"]), new DefaultAzureCredential()));
+services.AddProblemDetails();
+'@
+    } -UseEvidence -ExpectedExit 0 -CheckId 'EXC001' -ExpectedStatuses @('ADVISORY') -ExtraAssert {
+        param($r, $report, $check)
+        if ($check.severity -ne 'ADVISORY') {
+            throw "EXC001 ADVISORY must keep ADVISORY severity but got $($check.severity)."
+        }
+    }
+
+    Assert-Case 'persist002-doc-marker-does-not-pass' {
+        param($r)
+        Remove-Item -LiteralPath (Join-Path $r 'src/Modules/Sales/Sales.Application/IOrderRepository.cs') -Force
+        Write-Utf8 (Join-Path $r 'docs/repository-guidance.md') 'Create IOrderRepository for abstraction.'
+    } -UseEvidence -ExpectedExit 0 -CheckId 'PERSIST002' -ExpectedStatuses @('ADVISORY')
 
     Assert-Case 'wolv-doc-marker-does-not-pass' {
         param($r)
@@ -451,7 +533,7 @@ services.AddProblemDetails();
     $schemaRoot = New-Fixture 'report-schema'
     [void](Invoke-Guard -Root $schemaRoot -UseEvidence)
     $schemaReport = Get-GuardReport $schemaRoot
-    if ($schemaReport.schemaVersion -eq '1.0' -and $schemaReport.guard.id -eq 'dotnet-sdd-guard' -and $schemaReport.guard.version -eq '1.0.1' -and $schemaReport.summary -and $schemaReport.checks.Count -gt 0) {
+    if ($schemaReport.schemaVersion -eq '1.0' -and $schemaReport.guard.id -eq 'dotnet-sdd-guard' -and $schemaReport.guard.version -eq '1.0.2' -and $schemaReport.summary -and $schemaReport.checks.Count -gt 0) {
         $script:Passed++
         Write-Output 'PASS report-json-schema'
     } else {

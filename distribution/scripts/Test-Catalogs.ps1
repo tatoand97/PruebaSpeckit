@@ -126,11 +126,11 @@ if (@($presets.presets.PSObject.Properties).Count -ne 1 -or $presets.presets.'do
 if (@($workflows.workflows.PSObject.Properties).Count -ne 1 -or $workflows.workflows.'dotnet-sdd-feature'.version -ne '0.1.1') {
     Add-Failure 'Workflow catalog must contain only dotnet-sdd-feature 0.1.1.'
 }
-if (@($extensions.extensions.PSObject.Properties).Count -ne 1 -or $extensions.extensions.'dotnet-sdd-guard'.version -ne '1.0.1') {
-    Add-Failure 'Extension catalog must contain only dotnet-sdd-guard 1.0.1.'
+if (@($extensions.extensions.PSObject.Properties).Count -ne 1 -or $extensions.extensions.'dotnet-sdd-guard'.version -ne '1.0.2') {
+    Add-Failure 'Extension catalog must contain only dotnet-sdd-guard 1.0.2.'
 }
-if (@($bundles.bundles.PSObject.Properties).Count -ne 1 -or $bundles.bundles.'dotnet-sdd'.version -ne '1.0.1') {
-    Add-Failure 'Bundle catalog must contain only dotnet-sdd 1.0.1.'
+if (@($bundles.bundles.PSObject.Properties).Count -ne 1 -or $bundles.bundles.'dotnet-sdd'.version -ne '1.0.2') {
+    Add-Failure 'Bundle catalog must contain only dotnet-sdd 1.0.2.'
 }
 
 $presetUrl = $presets.presets.'dotnet-sdd'.download_url
@@ -149,8 +149,8 @@ if ($workflows.workflows.'dotnet-sdd-feature'.PSObject.Properties.Name -contains
 $artifactMap = @(
     @{ Path = Join-Path $artifactRoot 'dotnet-sdd-1.0.1.zip'; Expected = $presets.presets.'dotnet-sdd'.sha256; Zip = $true }
     @{ Path = Join-Path $artifactRoot 'dotnet-sdd-feature-0.1.1.yml'; Expected = $null; Zip = $false }
-    @{ Path = Join-Path $artifactRoot 'dotnet-sdd-guard-1.0.1.zip'; Expected = $extensions.extensions.'dotnet-sdd-guard'.sha256; Zip = $true }
-    @{ Path = Join-Path $artifactRoot 'dotnet-sdd-bundle-1.0.1.zip'; Expected = $bundles.bundles.'dotnet-sdd'.sha256; Zip = $true }
+    @{ Path = Join-Path $artifactRoot 'dotnet-sdd-guard-1.0.2.zip'; Expected = $extensions.extensions.'dotnet-sdd-guard'.sha256; Zip = $true }
+    @{ Path = Join-Path $artifactRoot 'dotnet-sdd-bundle-1.0.2.zip'; Expected = $bundles.bundles.'dotnet-sdd'.sha256; Zip = $true }
 )
 foreach ($artifact in $artifactMap) {
     if (-not (Test-Path -LiteralPath $artifact.Path -PathType Leaf)) {
@@ -218,9 +218,9 @@ with tempfile.TemporaryDirectory() as temp:
     assert installed_preset.id == "dotnet-sdd" and installed_preset.version == "1.0.1"
 
     installed_extension = ExtensionManager(project / "extension-consumer").install_from_zip(
-        artifact_root / "dotnet-sdd-guard-1.0.1.zip", "0.14.3"
+        artifact_root / "dotnet-sdd-guard-1.0.2.zip", "0.14.3"
     )
-    assert installed_extension.id == "dotnet-sdd-guard" and installed_extension.version == "1.0.1"
+    assert installed_extension.id == "dotnet-sdd-guard" and installed_extension.version == "1.0.2"
     assert "after_implement" in installed_extension.hooks
     assert installed_extension.hooks["after_implement"]["optional"] is False
 
@@ -231,16 +231,16 @@ with tempfile.TemporaryDirectory() as temp:
     errors = validate_workflow(workflow)
     assert not errors, errors
 
-    with zipfile.ZipFile(artifact_root / "dotnet-sdd-bundle-1.0.1.zip") as archive:
+    with zipfile.ZipFile(artifact_root / "dotnet-sdd-bundle-1.0.2.zip") as archive:
         manifest_data = archive.read("bundle.yml").decode("utf-8")
     import yaml
     bundle = BundleManifest.from_dict(yaml.safe_load(manifest_data))
     report = validate_manifest(bundle)
     assert report.ok, report.errors
-    assert bundle.bundle.id == "dotnet-sdd" and bundle.bundle.version == "1.0.1"
+    assert bundle.bundle.id == "dotnet-sdd" and bundle.bundle.version == "1.0.2"
     pins = {(component.kind, component.id): component.version for component in bundle.components}
     assert pins == {
-        ("extensions", "dotnet-sdd-guard"): "1.0.1",
+        ("extensions", "dotnet-sdd-guard"): "1.0.2",
         ("presets", "dotnet-sdd"): "1.0.1",
         ("workflows", "dotnet-sdd-feature"): "0.1.1",
     }

@@ -152,7 +152,7 @@ These commands are prepared for a later explicitly authorized publication. They 
 not been executed:
 
 ```powershell
-$releaseTag = 'dotnet-sdd-distribution-v1.0.1'
+$releaseTag = 'dotnet-sdd-distribution-v1.0.2'
 
 .\distribution\scripts\Build-Distribution.ps1 -ReleaseTag $releaseTag
 .\distribution\scripts\Test-Catalogs.ps1
@@ -164,10 +164,10 @@ git push origin main
 gh release create $releaseTag `
   '.\distribution\artifacts\dotnet-sdd-1.0.1.zip' `
   '.\distribution\artifacts\dotnet-sdd-feature-0.1.1.yml' `
-  '.\distribution\artifacts\dotnet-sdd-guard-1.0.1.zip' `
-  '.\distribution\artifacts\dotnet-sdd-bundle-1.0.1.zip' `
+  '.\distribution\artifacts\dotnet-sdd-guard-1.0.2.zip' `
+  '.\distribution\artifacts\dotnet-sdd-bundle-1.0.2.zip' `
   --repo tatoand97/PruebaSpeckit `
-  --title '.NET SDD distribution 1.0.1' `
+  --title '.NET SDD distribution 1.0.2' `
   --notes 'Versioned Spec Kit catalogs and immutable .NET SDD artifacts.'
 
 .\distribution\scripts\Test-CleanInstall.ps1 -IgnoreAgentTools

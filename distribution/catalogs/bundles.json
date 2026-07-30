@@ -1,17 +1,17 @@
 {
   "schema_version": "1.0",
-  "updated_at": "2026-07-29T00:00:00Z",
+  "updated_at": "2026-07-30T00:00:00Z",
   "catalog_url": "https://raw.githubusercontent.com/tatoand97/PruebaSpeckit/main/distribution/catalogs/bundles.json",
   "bundles": {
     "dotnet-sdd": {
       "name": ".NET SDD Framework",
       "id": "dotnet-sdd",
-      "version": "1.0.1",
+      "version": "1.0.2",
       "role": "developer",
       "description": "Distribution bundle for the governed .NET SDD preset, workflow, and deterministic Guard",
       "author": "Contributors",
       "license": "MIT",
-      "download_url": "https://github.com/tatoand97/PruebaSpeckit/releases/download/__RELEASE_TAG__/dotnet-sdd-bundle-1.0.1.zip",
+      "download_url": "https://github.com/tatoand97/PruebaSpeckit/releases/download/__RELEASE_TAG__/dotnet-sdd-bundle-1.0.2.zip",
       "repository": "https://github.com/tatoand97/PruebaSpeckit",
       "requires": {
         "speckit_version": ">=0.14.3"
@@ -29,7 +29,7 @@
         "copilot"
       ],
       "verified": false,
-      "sha256": "9f218338e9535d154d558da1d2cc55c6967a62f32b61e807a30bf639d06d222e"
+      "sha256": "45b4e66745b82c0b265ba7eedc5cf48714e1a5e8de8cbd9721b835a6b47eb6cb"
     }
   }
 }

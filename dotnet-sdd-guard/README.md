@@ -1,6 +1,6 @@
 # .NET SDD Guard
 
-`dotnet-sdd-guard` 1.0.1 is the deterministic enforcement component for the
+`dotnet-sdd-guard` 1.0.2 is the deterministic enforcement component for the
 mechanically verifiable controls defined by `dotnet-sdd` 1.0.1. It does not judge
 business meaning, architecture trade-offs, or requirement interpretation.
 
