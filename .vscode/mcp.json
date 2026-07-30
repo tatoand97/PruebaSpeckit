@@ -1,16 +1,14 @@
 {
-  "servers": {
-    "context7": {
-      "type": "http",
-      "url": "https://mcp.context7.com/mcp"
-    },
-    "codebase-memory": {
-      "type": "stdio",
-      "command": "codebase-memory-mcp.exe",
-      "cwd": "${workspaceFolder}",
-      "env": {
-        "CBM_ALLOWED_ROOT": "${workspaceFolder}"
-      }
-    }
-  }
+	"servers": {
+		"context7": {
+			"url": "https://mcp.context7.com/mcp",
+			"type": "http"
+		},
+		"codebase-memory-mcp": {
+			"type": "stdio",
+			"command": "codebase-memory-mcp",
+			"args": []
+		}
+	},
+	"inputs": []
 }
