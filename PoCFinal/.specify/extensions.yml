@@ -1,0 +1,14 @@
+installed:
+- dotnet-sdd-guard
+settings:
+  auto_execute_hooks: true
+hooks:
+  after_implement:
+  - extension: dotnet-sdd-guard
+    command: speckit.dotnet-sdd-guard.verify
+    enabled: true
+    optional: false
+    priority: 5
+    prompt: Execute speckit.dotnet-sdd-guard.verify?
+    description: Run the mandatory deterministic quality gate after implementation
+    condition: null

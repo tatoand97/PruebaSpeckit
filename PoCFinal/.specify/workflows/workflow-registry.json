@@ -1,0 +1,21 @@
+{
+  "schema_version": "1.0",
+  "workflows": {
+    "speckit": {
+      "name": "Full SDD Cycle",
+      "version": "1.0.0",
+      "description": "Runs specify \u2192 plan \u2192 tasks \u2192 implement with review gates",
+      "source": "bundled",
+      "installed_at": "2026-07-30T14:01:16.744803+00:00",
+      "updated_at": "2026-07-30T14:01:16.744810+00:00"
+    },
+    "dotnet-sdd-feature": {
+      "name": ".NET SDD Feature",
+      "version": "0.1.1",
+      "description": "Standard governed SDD workflow for .NET feature development using Spec Kit and dotnet-sdd, with bounded automatic analysis.",
+      "source": "C:\\Users\\PC\\Desktop\\PruebaSpeckit\\dotnet-sdd-feature",
+      "installed_at": "2026-07-30T14:03:06.254371+00:00",
+      "updated_at": "2026-07-30T14:03:06.254386+00:00"
+    }
+  }
+}
