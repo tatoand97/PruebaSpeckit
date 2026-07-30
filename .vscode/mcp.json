@@ -6,11 +6,8 @@
 		},
 		"graphify": {
 			"type": "stdio",
-			"command": "uvx",
+			"command": "python",
 			"args": [
-				"--from",
-				"graphifyy[mcp]",
-				"python",
 				"-m",
 				"graphify.serve",
 				"${workspaceFolder}/graphify-out/graph.json"

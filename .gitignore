@@ -7,13 +7,10 @@ packages/
 Thumbs.db
 *.tmp
 *.swp
-.vscode/
 .idea/
 .local/
 TestResults/
 *.trx
-.vscode/
-!.vscode/
 .vscode/*
 !.vscode/mcp.json
 graphify-out/
