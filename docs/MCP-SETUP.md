@@ -2,6 +2,7 @@
 
 Prerequisites:
 - Python >= 3.10
+- pip
 - VS Code
 - GitHub Copilot
 
@@ -14,6 +15,7 @@ python -m pip install --user -r tools/mcp/requirements.txt
 Verify:
 
 ```powershell
+python -m pip show graphifyy
 python -m graphify --version
 python -c "import graphify.serve; print('Graphify MCP OK')"
 ```
