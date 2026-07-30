@@ -16,4 +16,5 @@ TestResults/
 !.vscode/
 .vscode/*
 !.vscode/mcp.json
+graphify-out/
 

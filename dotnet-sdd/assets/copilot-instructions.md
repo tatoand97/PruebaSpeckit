@@ -22,10 +22,10 @@
 - Avoid multi-agent execution by default and keep model context reasonably small.
 - Repository exploration policy
 
-  For structural questions about the current repository, prefer codebase-memory-mcp before broad grep, glob, or file traversal.
+  For structural questions about the current repository, prefer the smallest sufficient local context before broad grep, glob, or file traversal.
   Use it for architecture discovery, symbol search, callers/callees, implementation relationships, dependency impact, HTTP route relationships, and locating candidate files.
-  After locating candidate code with the graph, read the actual source files before editing.
-  Never modify code solely from graph-derived information.
+  After locating candidate code, read the actual source files before editing.
+  Never modify code solely from inferred relationships.
 
 - External documentation policy
 
@@ -38,11 +38,11 @@
   Do not retrieve context merely because an MCP tool exists.
   Use the smallest sufficient context.
   Prefer graph query -> identify candidate symbols/files -> read only relevant files over recursive repository search and manual architecture inference.
-  Do not call both repository search and codebase-memory for the same question unless the graph result is insufficient or needs verification.
+  Do not call both repository search and a graph query for the same question unless the graph result is insufficient or needs verification.
 
 - SDD integration policy
 
-  For specify and review-spec, keep Context7 and codebase-memory off by default.
-  For plan and review-plan, use codebase-memory for brownfield work and Context7 only when external API or library knowledge is needed.
-  For tasks and implement, use codebase-memory first for brownfield discovery, then read source before editing; use Context7 only when documentation is actually required.
-  For analyze and converge, use codebase-memory for impact and gap discovery, and keep Context7 normally off unless an external library question is part of the task.
+  For specify and review-spec, keep Context7 off by default.
+  For plan and review-plan, use local repository context for brownfield work and Context7 only when external API or library knowledge is needed.
+  For tasks and implement, use local repository context first for brownfield discovery, then read source before editing; use Context7 only when documentation is actually required.
+  For analyze and converge, use local repository context for impact and gap discovery, and keep Context7 normally off unless an external library question is part of the task.

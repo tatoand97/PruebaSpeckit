@@ -1,8 +1,0 @@
-**/bin/
-**/obj/
-**/TestResults/
-**/artifacts/
-**/coverage/
-poc-final-dotnet-sdd/
-poc-final-dotnet-sdd-retry/
-poc2-tuya-dotnet-sdd/
