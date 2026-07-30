@@ -130,13 +130,16 @@ function Test-Architecture {
                 }
                 'Application' {
                     if ($targetLayer -in @('Infrastructure', 'Presentation', 'Server')) { $bad = $true }
+                    if (-not $targetCommon -and $targetModule -and $sourceModule -and $targetModule -ne $sourceModule) { $bad = $true }
                 }
                 'Infrastructure' {
                     if ($targetLayer -in @('Presentation', 'Server')) { $bad = $true }
+                    if (-not $targetCommon -and $targetModule -and $sourceModule -and $targetModule -ne $sourceModule) { $bad = $true }
                 }
                 'Presentation' {
                     if ($targetLayer -in @('Domain', 'Infrastructure', 'Server')) { $bad = $true }
                     if ($targetCommon -and $targetLayer -ne 'Presentation') { $bad = $true }
+                    if (-not $targetCommon -and $targetModule -and $sourceModule -and $targetModule -ne $sourceModule) { $bad = $true }
                 }
                 'Server' {
                     if ($targetLayer -ne 'Presentation') { $bad = $true }
@@ -202,7 +205,7 @@ function Get-ExceptionHandlers {
     param([System.IO.FileInfo[]]$SourceFiles)
 
     $registrations = [System.Collections.Generic.List[object]]::new()
-    $handlerDefinitions = [System.Collections.Generic.Dictionary[string, bool]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $handlerDefinitions = [System.Collections.Generic.Dictionary[string, object]]::new([System.StringComparer]::OrdinalIgnoreCase)
 
     foreach ($file in $SourceFiles) {
         $content = Get-Content -LiteralPath $file.FullName -Raw -ErrorAction SilentlyContinue
@@ -225,9 +228,32 @@ function Get-ExceptionHandlers {
         foreach ($classMatch in [regex]::Matches($content, 'class\s+([A-Za-z0-9_]+)\b[^\{]*IExceptionHandler')) {
             $className = $classMatch.Groups[1].Value
             $classStart = $classMatch.Index
-            $tail = $content.Substring($classStart)
-            $returnsTrue = $tail -match '\breturn\s+true\s*;'
-            $handlerDefinitions[$className] = $returnsTrue
+            $openingBrace = $content.IndexOf('{', $classStart)
+            if ($openingBrace -lt 0) { continue }
+
+            $depth = 0
+            $classEnd = -1
+            for ($index = $openingBrace; $index -lt $content.Length; $index++) {
+                $char = $content[$index]
+                if ($char -eq '{') {
+                    $depth++
+                    continue
+                }
+                if ($char -eq '}') {
+                    $depth--
+                    if ($depth -eq 0) {
+                        $classEnd = $index
+                        break
+                    }
+                }
+            }
+            if ($classEnd -lt 0) { continue }
+
+            $classBody = $content.Substring($openingBrace, $classEnd - $openingBrace + 1)
+            $handlerDefinitions[$className] = [ordered]@{
+                returnTrue  = ($classBody -match '\breturn\s+true\s*;')
+                returnFalse = ($classBody -match '\breturn\s+false\s*;')
+            }
         }
     }
 
@@ -264,8 +290,12 @@ function Test-ExceptionHandlerOrder {
         $typeName = [string]$registration.handler
         $shortName = ($typeName -split '\.')[-1]
         $isFallbackByName = $shortName -match '(Global|Fallback)'
-        $returnsTrue = $definitions.ContainsKey($shortName) -and $definitions[$shortName]
-        if ($isFallbackByName -or $returnsTrue) {
+        $definition = if ($definitions.ContainsKey($shortName)) { $definitions[$shortName] } else { $null }
+        $isAlwaysTrue = $false
+        if ($definition) {
+            $isAlwaysTrue = [bool]$definition.returnTrue -and -not [bool]$definition.returnFalse
+        }
+        if ($isFallbackByName -or $isAlwaysTrue) {
             $fallback.Add($registration)
         }
         else {
@@ -278,7 +308,8 @@ function Test-ExceptionHandlerOrder {
     $firstFallback = if ($fallback.Count -gt 0) { $fallback[0] } else { $null }
     $hasFallbackReturningTrue = @($fallback | Where-Object {
             $typeName = (($_.handler -split '\.')[-1])
-            $definitions.ContainsKey($typeName) -and $definitions[$typeName]
+            if (-not $definitions.ContainsKey($typeName)) { return $false }
+            return [bool]$definitions[$typeName].returnTrue
         }).Count -gt 0
 
     if ($firstSpecific -and $firstFallback -and $hasFallbackReturningTrue) {
@@ -522,15 +553,15 @@ try {
     }
 
     if ($http) {
-        $hasWolverine = Test-AnyPattern $files @('WolverineFx')
-        $hasMediatorOnly = Test-AnyPattern $files @('DurabilityMode\.MediatorOnly')
+        $hasWolverine = Test-AnyPattern $implementationFiles @('WolverineFx')
+        $hasMediatorOnly = Test-AnyPattern $implementationFiles @('DurabilityMode\.MediatorOnly')
         Add-Check 'WOLV001' 'messaging' $(if ($hasWolverine) { 'PASS' } else { 'FAIL' }) 'HARD' `
             $(if ($hasWolverine) { 'Wolverine dependency is present.' } else { 'Wolverine dependency is missing for an HTTP application.' }) `
             $(if ($hasWolverine) { 'WolverineFx marker found.' } else { 'No WolverineFx marker found.' })
         Add-Check 'WOLV002' 'messaging' $(if ($hasMediatorOnly) { 'PASS' } else { 'FAIL' }) 'HARD' `
             $(if ($hasMediatorOnly) { 'Wolverine is configured as mediator-only.' } else { 'DurabilityMode.MediatorOnly is missing.' }) `
             $(if ($hasMediatorOnly) { 'MediatorOnly marker found.' } else { 'MediatorOnly marker absent.' })
-        $transport = Test-AnyPattern $files @('WolverineFx\.(RabbitMQ|AzureServiceBus|Kafka|AmazonSqs|Pulsar|Nats)')
+        $transport = Test-AnyPattern $implementationFiles @('WolverineFx\.(RabbitMQ|AzureServiceBus|Kafka|AmazonSqs|Pulsar|Nats)')
         Add-Check 'WOLV003' 'messaging' $(if ($transport) { 'FAIL' } else { 'PASS' }) 'HARD' `
             $(if ($transport) { 'A distributed Wolverine transport package contradicts the baseline.' } else { 'No distributed Wolverine transport package was detected.' }) `
             $(if ($transport) { 'A prohibited explicit transport marker was found.' } else { 'No explicit prohibited transport marker found.' })
@@ -541,20 +572,20 @@ try {
         )
         $azureOk = $true
         foreach ($pattern in $azurePatterns) {
-            if (-not (Test-AnyPattern $files @($pattern))) { $azureOk = $false }
+            if (-not (Test-AnyPattern $implementationFiles @($pattern))) { $azureOk = $false }
         }
-        $hardcodedAzure = Test-AnyPattern $files @('new\s+Uri\s*\(\s*"https://[^"]+\.azconfig\.io')
+        $hardcodedAzure = Test-AnyPattern $implementationFiles @('new\s+Uri\s*\(\s*"https://[^"]+\.azconfig\.io')
         Add-Check 'AZURE001' 'configuration' $(if ($azureOk -and -not $hardcodedAzure) { 'PASS' } else { 'FAIL' }) 'HARD' `
             $(if ($azureOk -and -not $hardcodedAzure) { 'Azure App Configuration preparation is present.' } else { 'Azure App Configuration preparation is incomplete or hard-coded.' }) `
             'Required package/API markers and external endpoint handling were checked without contacting Azure.'
 
-        $problemOk = (Test-AnyPattern $files @('AddProblemDetails\s*\(')) -and (Test-AnyPattern $files @('\bIExceptionHandler\b'))
+        $problemOk = (Test-AnyPattern $implementationFiles @('AddProblemDetails\s*\(')) -and (Test-AnyPattern $implementationFiles @('\bIExceptionHandler\b'))
         Add-Check 'HTTP001' 'http' $(if ($problemOk) { 'PASS' } else { 'FAIL' }) 'HARD' `
             $(if ($problemOk) { 'Problem Details infrastructure is present.' } else { 'AddProblemDetails and IExceptionHandler are required.' }) `
             'HTTP error-handling markers were checked.'
 
-        $controller = Test-AnyPattern $files @('\bControllerBase\b', '\[ApiController\]')
-        $minimal = Test-AnyPattern $files @('\bMap(Get|Post|Put|Delete|Patch|Group)\s*\(')
+        $controller = Test-AnyPattern $implementationFiles @('\bControllerBase\b', '\[ApiController\]')
+        $minimal = Test-AnyPattern $implementationFiles @('\bMap(Get|Post|Put|Delete|Patch|Group)\s*\(')
         if ($controller) {
             Add-Check 'HTTP002' 'http' 'ADVISORY' 'ADVISORY' 'Controllers were detected; confirm Minimal APIs remain the primary architecture.' 'Controller architecture markers found.'
         } elseif ($minimal) {

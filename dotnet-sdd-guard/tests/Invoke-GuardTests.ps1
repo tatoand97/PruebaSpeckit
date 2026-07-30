@@ -284,6 +284,12 @@ try {
         Write-Utf8 (Join-Path $r 'src/Modules/Sales/Sales.Application/Sales.Application.csproj') '<Project Sdk="Microsoft.NET.Sdk"><ItemGroup><ProjectReference Include="../Sales.Domain/Sales.Domain.csproj" /><ProjectReference Include="../Sales.Infrastructure/Sales.Infrastructure.csproj" /></ItemGroup></Project>'
     } -UseEvidence -ExpectedExit 1 -CheckId 'ARCH001' -ExpectedStatuses @('FAIL')
 
+    Assert-Case 'arch-cross-module-presentation-to-application-fail' {
+        param($r)
+        Write-Utf8 (Join-Path $r 'src/Modules/Billing/Billing.Application/Billing.Application.csproj') '<Project Sdk="Microsoft.NET.Sdk" />'
+        Write-Utf8 (Join-Path $r 'src/Modules/Sales/Sales.Presentation/Sales.Presentation.csproj') '<Project Sdk="Microsoft.NET.Sdk"><ItemGroup><ProjectReference Include="../../Billing/Billing.Application/Billing.Application.csproj" /></ItemGroup></Project>'
+    } -UseEvidence -ExpectedExit 1 -CheckId 'ARCH001' -ExpectedStatuses @('FAIL')
+
     Assert-Case 'arch-common-to-module-fail' {
         param($r)
         Write-Utf8 (Join-Path $r 'src/Common/Common.Presentation/Common.Presentation.csproj') '<Project Sdk="Microsoft.NET.Sdk"><ItemGroup><ProjectReference Include="../../Modules/Sales/Sales.Presentation/Sales.Presentation.csproj" /></ItemGroup></Project>'
@@ -371,6 +377,58 @@ builder.Configuration.AddAzureAppConfiguration(o => o.Connect(new Uri(config["Ap
 services.AddProblemDetails();
 '@
     } -UseEvidence -ExpectedExit 0 -CheckId 'EXC001' -ExpectedStatuses @('FAIL', 'ADVISORY')
+
+    Assert-Case 'exc-guarded-specific-remains-specific' {
+        param($r)
+        Write-Utf8 (Join-Path $r 'src/App.Server/Program.cs') @'
+services.AddExceptionHandler<GlobalFallbackExceptionHandler>();
+services.AddExceptionHandler<SalesKnownExceptionHandler>();
+public sealed class SalesKnownException : Exception { }
+public sealed class SalesKnownExceptionHandler : IExceptionHandler {
+    public bool TryHandleAsync(HttpContext context, Exception exception, CancellationToken token) {
+        if (exception is not SalesKnownException) {
+            return false;
+        }
+        return true;
+    }
+}
+public sealed class GlobalFallbackExceptionHandler : IExceptionHandler {
+    public bool TryHandleAsync(HttpContext context, Exception ex, CancellationToken token) {
+        return true;
+    }
+}
+opts.DurabilityMode = DurabilityMode.MediatorOnly;
+builder.Configuration.AddAzureAppConfiguration(o => o.Connect(new Uri(config["AppConfigEndpoint"]), new DefaultAzureCredential()));
+services.AddProblemDetails();
+'@
+    } -UseEvidence -ExpectedExit 0 -CheckId 'EXC001' -ExpectedStatuses @('FAIL')
+
+    Assert-Case 'wolv-doc-marker-does-not-pass' {
+        param($r)
+        Write-Utf8 (Join-Path $r 'src/Modules/Sales/Sales.Application/Sales.Application.csproj') '<Project Sdk="Microsoft.NET.Sdk"><ItemGroup><ProjectReference Include="../Sales.Domain/Sales.Domain.csproj" /></ItemGroup></Project>'
+        Write-Utf8 (Join-Path $r 'src/App.Server/Program.cs') 'builder.Configuration.AddAzureAppConfiguration(o => o.Connect(new Uri(config["AppConfigEndpoint"]), new DefaultAzureCredential())); services.AddProblemDetails(); class GlobalFallbackExceptionHandler : IExceptionHandler { public bool TryHandleAsync(HttpContext context, Exception ex, CancellationToken token) { return true; } }'
+        Write-Utf8 (Join-Path $r 'docs/wolverine-notes.md') 'WolverineFx DurabilityMode.MediatorOnly WolverineFx.RabbitMQ'
+    } -UseEvidence -ExpectedExit 1 -CheckId 'WOLV001' -ExpectedStatuses @('FAIL') -ExtraAssert {
+        param($r, $report, $check)
+        $check2 = Get-Check $report 'WOLV002'
+        if (-not $check2 -or $check2.status -ne 'FAIL') {
+            throw 'WOLV002 should fail when MediatorOnly only appears in documentation.'
+        }
+    }
+
+    Assert-Case 'azure-doc-marker-does-not-pass' {
+        param($r)
+        Write-Utf8 (Join-Path $r 'src/Modules/Sales/Sales.Infrastructure/Sales.Infrastructure.csproj') '<Project Sdk="Microsoft.NET.Sdk"><ItemGroup><ProjectReference Include="../Sales.Application/Sales.Application.csproj" /></ItemGroup></Project>'
+        Write-Utf8 (Join-Path $r 'src/App.Server/Program.cs') 'opts.DurabilityMode = DurabilityMode.MediatorOnly; services.AddProblemDetails(); class GlobalFallbackExceptionHandler : IExceptionHandler { public bool TryHandleAsync(HttpContext context, Exception ex, CancellationToken token) { return true; } }'
+        Write-Utf8 (Join-Path $r 'specs/001/research.md') 'Microsoft.Azure.AppConfiguration.AspNetCore Azure.Identity AddAzureAppConfiguration(DefaultAzureCredential())'
+    } -UseEvidence -ExpectedExit 1 -CheckId 'AZURE001' -ExpectedStatuses @('FAIL')
+
+    Assert-Case 'http-doc-marker-does-not-pass' {
+        param($r)
+        Write-Utf8 (Join-Path $r 'src/Modules/Sales/Sales.Presentation/Endpoints.cs') 'app.MapGet("/orders", () => 1);'
+        Write-Utf8 (Join-Path $r 'src/App.Server/Program.cs') 'opts.DurabilityMode = DurabilityMode.MediatorOnly; builder.Configuration.AddAzureAppConfiguration(o => o.Connect(new Uri(config["AppConfigEndpoint"]), new DefaultAzureCredential()));'
+        Write-Utf8 (Join-Path $r '.specify/templates/http-template.md') 'Use AddProblemDetails() and implement IExceptionHandler.'
+    } -UseEvidence -ExpectedExit 1 -CheckId 'HTTP001' -ExpectedStatuses @('FAIL')
 
     Assert-Case 'invoke-external-preserves-exit-and-coverage-args' {
         param($r)
