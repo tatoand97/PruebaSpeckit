@@ -4,6 +4,8 @@
 
 Use the single root `openspec/` tree and its `dotnet-sdd` schema. The canonical policy is `docs/architecture/dotnet-sdd-governance.md`; summarize or link it rather than duplicating it.
 
+The active contact-request contract is `openspec/specs/contact-requests/contracts/openapi.yaml`. Historical contracts under `docs/sdd-history/` or `legacy/` never satisfy current gates. OpenSpec `1.7.0` is the minimum supported CLI version.
+
 For Codex, invoke OpenSpec through `.codex/skills/openspec-*` (for example `$openspec-propose`, `$openspec-explore`, `$openspec-update-change`, `$openspec-apply-change`, `$openspec-sync-specs`, and `$openspec-archive-change`). Do not use terminal-style `/opsx:*` syntax in Codex. Regenerate managed skills with `openspec update`; never edit them manually.
 
 Use `openspec` terminal commands for state and validation: `openspec list`, `openspec status`, `openspec schemas`, and `openspec validate`. Run `./scripts/Invoke-OpenSpecSddGuard.ps1` before completion.

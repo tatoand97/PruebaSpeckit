@@ -36,14 +36,20 @@ $scanExtensions = @('.cs', '.csproj', '.props', '.targets', '.json', '.yaml', '.
 $scanFiles = @(Get-ChildItem -LiteralPath $resolvedRepository -Recurse -File -ErrorAction SilentlyContinue |
     Where-Object {
         $_.Extension -in $scanExtensions -and
-        $_.FullName -notmatch '[\\/](\.git|legacy|bin|obj|artifacts|TestResults|node_modules)[\\/]'
+        $_.FullName -notmatch '[\\/](\.git|legacy|bin|obj|artifacts|TestResults|node_modules)[\\/]' -and
+        $_.FullName -notmatch '[\\/]docs[\\/]sdd-history[\\/]'
     })
 $forbiddenPatterns = @(
     'ghp_[A-Za-z0-9]{20,}',
     'github_pat_[A-Za-z0-9_]{20,}',
     '-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----',
     '(?i)(?:password|clientsecret|accountkey)\s*[:=]\s*["''][^"'']{8,}["'']',
-    '[A-Za-z]:\\Users\\[A-Za-z0-9._-]+\\'
+    ('[A-Za-z]:' + '\\Users\\[A-Za-z0-9._-]+\\'),
+    ('[A-Za-z]:' + '/Users/[A-Za-z0-9._-]+/'),
+    ('file' + '://'),
+    ('local' + 'host'),
+    ('127' + '\.0\.0\.1'),
+    ('\[' + '::1\]')
 )
 $forbiddenCount = 0
 foreach ($file in $scanFiles) {
@@ -57,7 +63,7 @@ foreach ($file in $scanFiles) {
     }
 }
 if ($forbiddenCount -gt 0) {
-    Write-Error "$forbiddenCount file(s) contain a high-confidence secret or local absolute path marker."
+    Write-Error "$forbiddenCount file(s) contain a high-confidence secret or local-environment marker."
     exit 1
 }
 Write-Output "PASS scanned $($scanFiles.Count) text file(s)."

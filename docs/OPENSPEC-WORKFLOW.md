@@ -2,6 +2,8 @@
 
 The repository uses one root OpenSpec project with default schema `dotnet-sdd`. Project context and per-artifact rules live in `openspec/config.yaml`; detailed governance lives only in `docs/architecture/dotnet-sdd-governance.md`.
 
+OpenSpec `1.7.0` is the minimum supported version. The active registration contract is `openspec/specs/contact-requests/contracts/openapi.yaml`; contracts under `docs/sdd-history/` or `legacy/` are immutable evidence and never participate in current validation.
+
 ## Terminal commands
 
 ```powershell
@@ -23,7 +25,7 @@ openspec validate --all --strict
 - Synchronize durable capability specs.
 - Verify, then archive the completed change.
 
-Codex uses the generated skills such as `$openspec-propose`; it does not use terminal slash commands. GitHub Copilot exposes the generated `/opsx-*` prompt files.
+Codex uses `$openspec-propose`, `$openspec-explore`, `$openspec-update-change`, `$openspec-apply-change`, `$openspec-sync-specs`, and `$openspec-archive-change`; it does not use terminal slash commands. GitHub Copilot exposes `/opsx-propose`, `/opsx-explore`, `/opsx-update`, `/opsx-apply`, `/opsx-sync`, and `/opsx-archive`.
 
 ## Explicit quality gate
 
@@ -31,4 +33,4 @@ Codex uses the generated skills such as `$openspec-propose`; it does not use ter
 ./scripts/Invoke-OpenSpecSddGuard.ps1
 ```
 
-The command validates OpenSpec, scans for high-confidence secrets and local absolute paths, restores and builds with warnings as errors, executes unit tests and coverage, enforces architecture and platform rules, and lints all retained OpenAPI contracts with Redocly CLI `2.41.1`.
+The command validates OpenSpec, scans for high-confidence secrets and local-environment markers, restores and builds with warnings as errors, executes unit tests and coverage, enforces architecture and platform rules, and lints active OpenAPI contracts with Redocly CLI `2.41.1`.

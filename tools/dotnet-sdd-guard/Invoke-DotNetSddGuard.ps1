@@ -178,6 +178,8 @@ function Invoke-External {
         $commandName = $FilePath
         if ($FilePath -eq 'dotnet' -and -not [string]::IsNullOrWhiteSpace($env:SDD_GUARD_DOTNET_PATH)) {
             $commandName = $env:SDD_GUARD_DOTNET_PATH
+        } elseif ($FilePath -eq 'npx' -and -not [string]::IsNullOrWhiteSpace($env:SDD_GUARD_NPX_PATH)) {
+            $commandName = $env:SDD_GUARD_NPX_PATH
         }
 
         $resolvedCommand = if (Test-Path -LiteralPath $commandName -PathType Leaf) {
@@ -536,8 +538,25 @@ try {
     $implementationFiles = @(Get-ImplementationFiles $resolvedRoot)
     $projects = @(Get-ChildItem -LiteralPath $resolvedRoot -Recurse -Filter '*.csproj' -File |
         Where-Object { $_.FullName -notmatch '[\\/](bin|obj|artifacts)[\\/]' })
-    $http = @($projects | Where-Object { (Get-ProjectLayer $_) -in @('Presentation', 'Server') }).Count -gt 0 -or
-        (Test-Path -LiteralPath (Join-Path $resolvedContractRoot 'openspec/specs'))
+    $openApis = @(
+        foreach ($relativeRoot in @('openspec/specs', 'openspec/changes', 'docs/contracts')) {
+            $candidateRoot = Join-Path $resolvedContractRoot $relativeRoot
+            if (-not (Test-Path -LiteralPath $candidateRoot -PathType Container)) { continue }
+            Get-ChildItem -LiteralPath $candidateRoot -Recurse -Filter 'openapi.yaml' -File -ErrorAction SilentlyContinue |
+                Where-Object {
+                    $relative = $_.FullName.Substring($resolvedContractRoot.Length).TrimStart([char[]]@([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)).Replace([IO.Path]::DirectorySeparatorChar, '/')
+                    $relative -match '^openspec/specs/.+/contracts/openapi\.yaml$' -or
+                    $relative -match '^openspec/changes/(?!archive/).+/specs/.+/contracts/openapi\.yaml$' -or
+                    $relative -match '^docs/contracts/.+/openapi\.yaml$'
+                }
+        }
+    )
+    $webProject = @($projects | Where-Object {
+        (Get-Content -LiteralPath $_.FullName -Raw -ErrorAction SilentlyContinue) -match '<Project\s+Sdk=["'']Microsoft\.NET\.Sdk\.Web["'']'
+    }).Count -gt 0
+    $http = $webProject -or
+        (Test-AnyPattern $implementationFiles @('\bMap(Get|Post|Put|Delete|Patch|Group)\s*\(', '\[ApiController\]', '\bControllerBase\b')) -or
+        $openApis.Count -gt 0
 
     if (Test-DotNet10 $resolvedRoot) {
         Add-Check 'SDK001' 'sdk' 'PASS' 'HARD' '.NET 10 target is configured.' 'SDK/framework declarations are consistent.'
@@ -697,13 +716,12 @@ try {
                 "lineCoveragePercent=$coverage"
         }
 
-        $openApis = @(Get-ChildItem -LiteralPath $resolvedContractRoot -Recurse -Filter 'openapi.yaml' -File -ErrorAction SilentlyContinue |
-            Where-Object {
-                $_.FullName -match '[\\/]contracts[\\/]openapi\.yaml$' -and
-                $_.FullName -notmatch '[\\/](legacy|bin|obj|artifacts|TestResults|\.git)[\\/]'
-            })
         if ($openApis.Count -eq 0) {
-            Add-Check 'OPENAPI001' 'openapi' 'NOT_APPLICABLE' 'NONE' 'No applicable OpenAPI contract was found.' 'No active or preserved contracts/openapi.yaml file exists.'
+            if ($http) {
+                Add-Check 'OPENAPI001' 'openapi' 'FAIL' 'HARD' 'An HTTP application requires at least one active OpenAPI contract.' 'No contract was found under the supported active contract roots.'
+            } else {
+                Add-Check 'OPENAPI001' 'openapi' 'NOT_APPLICABLE' 'NONE' 'OpenAPI does not apply to this non-HTTP project.' 'No HTTP surface or active OpenAPI contract was detected.'
+            }
         } else {
             $openApiOk = $true
             if ($evidence -and $null -ne $evidence.openapi) {
@@ -716,7 +734,7 @@ try {
             }
             Add-Check 'OPENAPI001' 'openapi' $(if ($openApiOk) { 'PASS' } else { 'FAIL' }) 'HARD' `
                 $(if ($openApiOk) { 'Version-pinned Redocly lint succeeded.' } else { 'Version-pinned Redocly lint failed.' }) `
-                "$($openApis.Count) contract(s) checked; runtime equivalence was not claimed."
+                "$($openApis.Count) active contract(s) checked; historical contracts were excluded and runtime equivalence was not claimed."
         }
     }
 }

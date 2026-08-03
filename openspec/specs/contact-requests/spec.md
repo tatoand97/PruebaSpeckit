@@ -4,6 +4,8 @@
 
 Allow an unauthenticated visitor to register a contact request, receive a privacy-preserving confirmation, and get actionable field errors without persisting invalid data.
 
+The active HTTP contract for this capability is [contracts/openapi.yaml](contracts/openapi.yaml).
+
 ## Requirements
 
 ### Requirement: Register a contact request

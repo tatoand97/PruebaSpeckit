@@ -3,6 +3,7 @@ param()
 
 $ErrorActionPreference = 'Stop'
 $guard = (Resolve-Path (Join-Path $PSScriptRoot '../Invoke-DotNetSddGuard.ps1')).Path
+$repositoryGuard = (Resolve-Path (Join-Path $PSScriptRoot '../../../scripts/Invoke-OpenSpecSddGuard.ps1')).Path
 $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("dotnet-sdd-guard-tests-" + [guid]::NewGuid().ToString('N'))
 $script:Passed = 0
 $script:Failed = 0
@@ -73,7 +74,7 @@ function New-Fixture {
     Write-Utf8 (Join-Path $root 'tests/UnitTests/Sales.UnitTests/Sales.UnitTests.csproj') '<Project Sdk="Microsoft.NET.Sdk"><ItemGroup><ProjectReference Include="../../../src/Modules/Sales/Sales.Application/Sales.Application.csproj" /></ItemGroup></Project>'
 
     if (-not $NoSpecs) {
-        Write-Utf8 (Join-Path $root 'specs/001/contracts/openapi.yaml') "openapi: 3.1.0`ninfo:`n  title: Fixture`n  version: 1.0.0`npaths: {}"
+        Write-Utf8 (Join-Path $root 'openspec/specs/sales/contracts/openapi.yaml') "openapi: 3.1.0`ninfo:`n  title: Fixture`n  version: 1.0.0`npaths: {}"
     }
 
     [void](New-EvidenceFile $root)
@@ -267,8 +268,113 @@ exit /b %ERRORLEVEL%
     return $envConfig
 }
 
+function Install-ExternalMocks {
+    param(
+        [string]$Root,
+        [int]$RestoreExit = 0,
+        [int]$BuildExit = 0,
+        [int]$TestExit = 0
+    )
+
+    $envConfig = Install-DotnetMock -Root $Root -RestoreExit $RestoreExit -BuildExit $BuildExit -TestExit $TestExit
+    $mockRoot = Join-Path $Root 'tools/mockbin'
+    $npxScript = @'
+$contractPath = if ($args.Count -gt 0) { $args[$args.Count - 1] } else { '' }
+if ($contractPath -and (Test-Path -LiteralPath $contractPath) -and
+    (Get-Content -LiteralPath $contractPath -Raw) -match 'INVALID_OPENAPI_FIXTURE') {
+    exit 1
+}
+exit 0
+'@
+    Write-Utf8 (Join-Path $mockRoot 'npx.ps1') $npxScript
+    $envConfig.SDD_GUARD_NPX_PATH = Join-Path $mockRoot 'npx.ps1'
+    return $envConfig
+}
+
+function Invoke-RepositoryScanFixture {
+    param(
+        [string]$Name,
+        [string]$Content
+    )
+
+    $root = Join-Path $tempRoot $Name
+    Write-Utf8 (Join-Path $root 'openspec/config.yaml') 'schema: dotnet-sdd'
+    New-Item -ItemType Directory -Path (Join-Path $root 'PoCFinal') -Force | Out-Null
+    Write-Utf8 (Join-Path $root 'tools/dotnet-sdd-guard/Invoke-DotNetSddGuard.ps1') 'param([string]$ProjectRoot, [string]$ContractRoot, [switch]$VerboseDiagnostics) exit 0'
+    Write-Utf8 (Join-Path $root 'src/scan-fixture.md') $Content
+
+    $mockRoot = Join-Path $root 'tools/mockbin'
+    Write-Utf8 (Join-Path $mockRoot 'openspec.cmd') "@echo off`r`nexit /b 0"
+    $originalPath = [Environment]::GetEnvironmentVariable('PATH', 'Process')
+    try {
+        [Environment]::SetEnvironmentVariable('PATH', "$mockRoot;$originalPath", 'Process')
+        & (Get-Process -Id $PID).Path -NoProfile -File $repositoryGuard -RepositoryRoot $root *> $null
+        return $LASTEXITCODE
+    }
+    finally {
+        [Environment]::SetEnvironmentVariable('PATH', $originalPath, 'Process')
+    }
+}
+
 try {
     New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+
+    Assert-Case 'openapi-historical-only-fails-http' {
+        param($r)
+        Remove-Item -LiteralPath (Join-Path $r 'openspec/specs/sales/contracts/openapi.yaml') -Force
+        Write-Utf8 (Join-Path $r 'docs/sdd-history/spec-kit/001/contracts/openapi.yaml') "openapi: 3.1.0`ninfo:`n  title: Historical`n  version: 1.0.0`npaths: {}"
+    } -UseEvidence -ExpectedExit 1 -CheckId 'OPENAPI001' -ExpectedStatuses @('FAIL')
+
+    Assert-Case 'openapi-active-valid-passes' {
+        param($r)
+    } -UseEvidence -ExpectedExit 0 -CheckId 'OPENAPI001' -ExpectedStatuses @('PASS')
+
+    Assert-Case 'openapi-active-invalid-fails' {
+        param($r)
+        Write-Utf8 (Join-Path $r 'openspec/specs/sales/contracts/openapi.yaml') 'INVALID_OPENAPI_FIXTURE'
+        return (Install-ExternalMocks -Root $r)
+    } -UseEvidence:$false -ExpectedExit 1 -CheckId 'OPENAPI001' -ExpectedStatuses @('FAIL')
+
+    Assert-Case 'openapi-invalid-history-is-ignored' {
+        param($r)
+        Write-Utf8 (Join-Path $r 'docs/sdd-history/spec-kit/001/contracts/openapi.yaml') 'INVALID_OPENAPI_FIXTURE'
+    } -UseEvidence -ExpectedExit 0 -CheckId 'OPENAPI001' -ExpectedStatuses @('PASS')
+
+    Assert-Case 'openapi-non-http-without-contract-is-not-applicable' {
+        param($r)
+        Remove-Item -LiteralPath (Join-Path $r 'openspec/specs/sales/contracts/openapi.yaml') -Force
+        Remove-Item -LiteralPath (Join-Path $r 'src/Modules/Sales/Sales.Presentation/Endpoints.cs') -Force
+        Write-Utf8 (Join-Path $r 'src/App.Server/App.Server.csproj') '<Project Sdk="Microsoft.NET.Sdk"><ItemGroup><ProjectReference Include="../Modules/Sales/Sales.Presentation/Sales.Presentation.csproj" /></ItemGroup></Project>'
+    } -UseEvidence -ExpectedExit 0 -CheckId 'OPENAPI001' -ExpectedStatuses @('NOT_APPLICABLE')
+
+    try {
+        $localMarkers = @(
+            ('C:' + '\Users\scan-user\'),
+            ('C:' + '/Users/scan-user/'),
+            ('file' + '://'),
+            ('local' + 'host'),
+            ('127' + '.0.0.1'),
+            ('[' + '::1]')
+        ) -join "`n"
+        $scanExit = Invoke-RepositoryScanFixture -Name 'local-scan-detects-all-markers' -Content $localMarkers
+        if ($scanExit -ne 1) { throw "Expected scanner exit 1 but got $scanExit." }
+        $script:Passed++
+        Write-Output 'PASS local-scan-detects-all-markers'
+    } catch {
+        $script:Failed++
+        Write-Output "FAIL local-scan-detects-all-markers - $($_.Exception.Message)"
+    }
+
+    try {
+        $regexDocumentation = 'Regex documentation may describe a drive prefix, a Users segment, or loopback tokens as separate fragments.'
+        $scanExit = Invoke-RepositoryScanFixture -Name 'local-scan-ignores-regex-documentation' -Content $regexDocumentation
+        if ($scanExit -ne 0) { throw "Expected scanner exit 0 but got $scanExit." }
+        $script:Passed++
+        Write-Output 'PASS local-scan-ignores-regex-documentation'
+    } catch {
+        $script:Failed++
+        Write-Output "FAIL local-scan-ignores-regex-documentation - $($_.Exception.Message)"
+    }
 
     Assert-Case 'arch-presentation-to-application-pass' { param($r) } -UseEvidence -ExpectedExit 0 -CheckId 'ARCH001' -ExpectedStatuses @('PASS')
 
@@ -312,11 +418,10 @@ try {
 
     Assert-Case 'test001-ignores-historical-trx' {
         param($r)
-        Remove-Item -LiteralPath (Join-Path $r 'specs') -Recurse -Force
         $old = Join-Path $r 'artifacts/sdd-guard/raw/old-run'
         New-Item -ItemType Directory -Path $old -Force | Out-Null
         Write-Utf8 (Join-Path $old 'historical.trx') '<?xml version="1.0" encoding="utf-8"?><TestRun><ResultSummary><Counters executed="11" passed="11" failed="0" notExecuted="0" /></ResultSummary></TestRun>'
-        return (Install-DotnetMock -Root $r -RestoreExit 0 -BuildExit 0 -TestExit 0)
+        return (Install-ExternalMocks -Root $r -RestoreExit 0 -BuildExit 0 -TestExit 0)
     } -UseEvidence:$false -ExpectedExit 0 -CheckId 'TEST001' -ExpectedStatuses @('PASS') -ExtraAssert {
         param($r, $report, $check)
         if ($check.evidence -notmatch 'executed=11; passed=11; failed=0; skipped=0') {
@@ -326,15 +431,14 @@ try {
 
     Assert-Case 'test001-new-run-ignores-previous-raw' {
         param($r)
-        Remove-Item -LiteralPath (Join-Path $r 'specs') -Recurse -Force
-        return (Install-DotnetMock -Root $r -RestoreExit 0 -BuildExit 0 -TestExit 0)
+        return (Install-ExternalMocks -Root $r -RestoreExit 0 -BuildExit 0 -TestExit 0)
     } -UseEvidence:$false -ExpectedExit 0 -CheckId 'TEST001' -ExpectedStatuses @('PASS') -ExtraAssert {
         param($r, $report, $check)
         if ($check.evidence -notmatch 'executed=11; passed=11; failed=0; skipped=0') {
             throw "First run evidence unexpected: $($check.evidence)"
         }
 
-        $envConfig = Install-DotnetMock -Root $r -RestoreExit 0 -BuildExit 0 -TestExit 0
+        $envConfig = Install-ExternalMocks -Root $r -RestoreExit 0 -BuildExit 0 -TestExit 0
         $second = Invoke-Guard -Root $r -Environment $envConfig
         if ($second -ne 0) { throw "Second run failed with code $second." }
         $secondReport = Get-GuardReport $r
@@ -514,8 +618,7 @@ services.AddProblemDetails();
 
     Assert-Case 'invoke-external-preserves-exit-and-coverage-args' {
         param($r)
-        Remove-Item -LiteralPath (Join-Path $r 'specs') -Recurse -Force
-        return (Install-DotnetMock -Root $r -RestoreExit 0 -BuildExit 0 -TestExit 7)
+        return (Install-ExternalMocks -Root $r -RestoreExit 0 -BuildExit 0 -TestExit 7)
     } -UseEvidence:$false -ExpectedExit 1 -CheckId 'TEST001' -ExpectedStatuses @('FAIL') -ExtraAssert {
         param($r, $report, $check)
         $log = Get-Content -LiteralPath (Join-Path $r 'dotnet-invocations.log') -Raw

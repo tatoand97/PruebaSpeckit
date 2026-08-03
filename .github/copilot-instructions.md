@@ -3,6 +3,8 @@
 - Use the single repository-root OpenSpec installation as the active SDD workflow.
 - Treat `docs/architecture/dotnet-sdd-governance.md` as the authority for architecture, security, contracts, and Definition of Done.
 - Use the project-local `dotnet-sdd` schema selected by `openspec/config.yaml`.
+- Use `openspec/specs/contact-requests/contracts/openapi.yaml` as the active contact-request contract. Never use `docs/sdd-history/` or `legacy/` as current gate evidence.
+- Require OpenSpec `1.7.0` or a compatible newer `1.x` release.
 - In Copilot chat, use the generated `/opsx-propose`, `/opsx-explore`, `/opsx-update`, `/opsx-apply`, `/opsx-sync`, and `/opsx-archive` prompts or the corresponding `openspec-*` skills.
 - Do not edit `.github/skills/openspec-*` or `.github/prompts/opsx-*`; regenerate them with `openspec update`.
 - Keep behavioral requirements in capability specs and implementation decisions in research/design artifacts.
@@ -25,3 +27,7 @@
 - Terminal: `openspec init`, `openspec update`, `openspec list`, `openspec status`, `openspec schemas`, and `openspec validate`.
 - Copilot chat: `/opsx-propose`, `/opsx-explore`, `/opsx-update`, `/opsx-apply`, `/opsx-sync`, and `/opsx-archive`.
 - The deterministic gate is explicit; OpenSpec does not run it as an automatic post-implementation hook.
+
+## Reusable installation
+
+The package under `distribution/openspec/dotnet-sdd/` installs the schema, generic configuration, canonical governance, deterministic guard, and requested assistant skills. It detects all payload collisions before modification and replaces differing files only with `-BackupExisting` and adjacent timestamped backups.

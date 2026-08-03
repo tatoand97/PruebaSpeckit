@@ -2,6 +2,10 @@ name: OpenSpec .NET SDD Verify
 
 on:
   pull_request:
+  workflow_dispatch:
+  push:
+    branches:
+      - chore/migrate-speckit-to-openspec
 
 permissions:
   contents: read
@@ -13,10 +17,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24.16.0
 
@@ -25,9 +29,9 @@ jobs:
         run: npm install --global @fission-ai/openspec@1.7.0
 
       - name: Set up .NET 10
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
         with:
-          dotnet-version: 10.0.x
+          global-json-file: global.json
 
       - name: Validate OpenSpec
         shell: pwsh
@@ -51,11 +55,11 @@ jobs:
           --results-directory PoCFinal/TestResults
           -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura
 
-      - name: Lint preserved OpenAPI contract
+      - name: Lint active OpenAPI contract
         shell: pwsh
         run: >-
           npx --yes @redocly/cli@2.41.1 lint
-          docs/sdd-history/spec-kit/001-registrar-contacto/contracts/openapi.yaml
+          openspec/specs/contact-requests/contracts/openapi.yaml
 
       - name: Run deterministic gate
         shell: pwsh
@@ -70,7 +74,7 @@ jobs:
 
       - name: Upload guard evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: dotnet-sdd-guard-evidence
           path: PoCFinal/artifacts/sdd-guard/

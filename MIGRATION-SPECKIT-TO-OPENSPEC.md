@@ -2,216 +2,150 @@
 
 ## Migration status
 
-The active SDD system is OpenSpec `1.7.0` with one repository-root `openspec/` project and the local `dotnet-sdd` schema. Previous Spec Kit assets are preserved only under `legacy/spec-kit/` and `docs/sdd-history/spec-kit/`; they are unsupported and are not referenced by active configuration, instructions, CI, application projects, or gates.
+The active SDD system is OpenSpec `1.7.0` with one repository-root `openspec/` project and the local `dotnet-sdd` schema. Previous Spec Kit assets are preserved only under `legacy/spec-kit/` and `docs/sdd-history/spec-kit/`; they are immutable historical evidence and do not participate in active configuration, instructions, CI, application projects, or gates.
 
-No release was published, no branch was pushed, and no pull request was opened.
+No release was published and no pull request was created during the migration execution.
 
-## Initial state
+## Review prechecks
 
-- Initial branch: `main`.
-- Initial working tree: clean.
-- Repository root: `C:/Users/PC/Desktop/PruebaSpeckit`.
-- Migration branch created: `chore/migrate-speckit-to-openspec`.
-- Spec Kit version found: `0.14.3`, recorded by the former preset, integration manifests, bundle metadata, catalog validators, and limitation report.
-- The current `HEAD` (`b85e668`) had already deleted the implemented application, solution, tests, constitution, and feature documents, leaving three reduced `.csproj` files. This was a preexisting repository state, not caused by the migration.
-- The last commit containing the implemented feature was `c3b33491f8de3a80713e2de7e885b88302924117`.
+- Branch: `chore/migrate-speckit-to-openspec`.
+- Initial working tree for this correction: clean.
+- Initial `HEAD`: `3e2ef8e`, also present at `origin/chore/migrate-speckit-to-openspec`.
+- Initial comparison with `main`: 190 files changed, 13,400 insertions, and 47 deletions.
+- Repository root in all reusable documentation: `<repository-root>`.
 
-### Initial .NET baseline
+The migration commit already existed on the remote branch before this correction. No push, force push, release, or pull request was performed during the correction.
 
-| Command | Initial result |
-|---|---|
-| `dotnet --info` | .NET SDK `10.0.302`; runtime `10.0.10` available. |
-| `dotnet restore PoCFinal/Api/PoCFinal.Server/PoCFinal.Server.csproj` | Passed. |
-| `dotnet build PoCFinal/Api/PoCFinal.Server/PoCFinal.Server.csproj -c Release --no-restore` | Failed with `CS5001`; `Program.cs` had already been deleted. |
-| `dotnet test PoCFinal/Modules/ContactRequests/Tests/ContactRequests.Test/ContactRequests.UnitTests.csproj -c Release` | Exited zero but discovered no tests because all test sources had already been deleted. |
-| Former guard tests | Passed 22/22. |
-| Former harness tests | Passed 25/25. |
-| Former catalog tests | Passed offline, with expected placeholder URL warning. |
-| Former clean-install simulation | Failed while installing the bundle: the workflow development source could not resolve `workflow.yml`. |
+## Corrected migration design
 
-## OpenSpec installation
+### Reusable distribution
 
-- Node.js: `24.16.0` (minimum required by current official OpenSpec documentation: `20.19.0`).
-- npm: `11.13.0`.
-- Installed OpenSpec: `1.7.0` using `npm install -g @fission-ai/openspec@latest` during the migration, after checking the official project documentation.
-- CI and reusable distribution use pinned OpenSpec `1.7.0`; they do not use `@latest`.
-- Initialized at repository root with Codex and GitHub Copilot tools. The unquoted PowerShell tool-list attempt was rejected without changes; the successful command quoted `codex,github-copilot`.
-- CLI-generated integrations: 6 Codex skills, 6 Copilot skills, and 6 Copilot prompt commands. Codex is skills-only in OpenSpec `1.7.0`.
+`distribution/openspec/dotnet-sdd/install.ps1` now installs:
 
-## Migrated inventory
+- the `dotnet-sdd` schema and templates;
+- generic `openspec/config.yaml` rules for proposal, specs, research, design, review, tasks, apply, and archive;
+- `docs/architecture/dotnet-sdd-governance.md`;
+- the deterministic guard and repository wrapper; and
+- the requested Codex and GitHub Copilot verification skills.
 
-### Active inputs found before migration
+The installer requires OpenSpec `1.7.0` or a compatible newer `1.x` release. It rejects unparseable, older, and unsupported-major versions. It detects all differing payload collisions before mutation, permits identical reinstallations, and replaces differing files only with `-BackupExisting` after creating adjacent timestamped backups. Consumers that already contain OpenSpec specs or changes receive `openspec validate --all --strict` after schema validation.
 
-- 10 root `.github/skills/speckit-*` generated skills.
-- `dotnet-sdd/` preset and templates.
-- `dotnet-sdd-feature/` workflow.
-- `dotnet-sdd-guard/` extension, hook command, engine, and tests.
-- `dotnet-sdd-harness/` workflow-run evaluation harness.
-- `dotnet-sdd-bundle/` bundle and ZIPs.
-- `distribution/catalogs/`, `distribution/artifacts/`, distribution scripts and reports.
-- Root Copilot instructions and `.vscode/mcp.json`.
-- The implemented `PoCFinal` application and feature artifacts existed only in Git history because `HEAD` had removed them.
+### Active OpenAPI contract
 
-### Origin to destination
+The active contract is `openspec/specs/contact-requests/contracts/openapi.yaml`. It was reconciled with the durable capability spec and the existing endpoint, request, result, validator, and exception handler. It describes only `POST /contact-requests`, including:
 
-| Origin | Active destination | Treatment |
-|---|---|---|
-| Root Spec Kit initialization and skills | `openspec/`, `.codex/skills/openspec-*`, `.github/skills/openspec-*`, `.github/prompts/opsx-*` | Replaced by files generated by OpenSpec CLI. |
-| `dotnet-sdd/preset.yml` and templates | `openspec/schemas/dotnet-sdd/` | Replaced by a versioned local schema and six templates. |
-| `dotnet-sdd-feature/workflow.yml` | `dotnet-sdd` artifact dependency graph | Replaced by native schema dependencies; no workflow simulator. |
-| `.specify/memory/constitution.md` | `docs/architecture/dotnet-sdd-governance.md` | Migrated, placeholders resolved, terminology adapted without weakening controls. |
-| Feature `spec.md` | `openspec/specs/contact-requests/spec.md` | Converted into a durable OpenSpec baseline using canonical Requirements and Scenarios. |
-| Full feature artifact directory | `docs/sdd-history/spec-kit/001-registrar-contacto/` | Preserved unmodified as historical evidence. |
-| `after_implement` extension hook | `scripts/Invoke-OpenSpecSddGuard.ps1` | Replaced by an explicit gate; no automatic hook is claimed. |
-| Guard engine | `tools/dotnet-sdd-guard/` | Refactored to remove runtime coupling and align project-reference checks with governance. |
-| Guard command skill | `.codex/skills/dotnet-sdd-verify/` and `.github/skills/dotnet-sdd-verify/` | Replaced by custom, non-managed verification skills. |
-| Bundle and catalogs | `distribution/openspec/dotnet-sdd/` | Replaced by auditable source files and collision-safe PowerShell installer. |
-| Workflow-run harness | `tools/openspec-sdd-harness/` | Replaced by sanitized explicit-gate evaluation records; no agent state is simulated. |
-| Previous instructions | `AGENTS.md`, root and `PoCFinal` Copilot instructions, `README.md`, `docs/OPENSPEC-WORKFLOW.md` | Updated to active OpenSpec surfaces and canonical governance link. |
+- required `name`, `email`, and `message` input;
+- name and message length limits and the current email rule;
+- `201 Created`, `Location`, UUID, creation timestamp, and `Pending` status;
+- privacy-preserving confirmation without name, email, or message; and
+- validation Problem Details with per-field errors and `traceId`.
 
-## Files created
+The historical contract under `docs/sdd-history/spec-kit/` was not modified. Redocly no longer reports a placeholder-server problem. Its remaining recommended-rule warning is the absent license metadata; no license was invented because the repository contains no real license file.
 
-- `openspec/config.yaml`
-- `openspec/schemas/dotnet-sdd/**`
-- `openspec/specs/contact-requests/spec.md`
-- `.codex/skills/openspec-*` (CLI-managed)
-- `.github/skills/openspec-*` and `.github/prompts/opsx-*` (CLI-managed)
-- `.codex/skills/dotnet-sdd-verify/**`
-- `.github/skills/dotnet-sdd-verify/SKILL.md`
-- `docs/architecture/dotnet-sdd-governance.md`
-- `docs/OPENSPEC-WORKFLOW.md`
-- `docs/sdd-history/spec-kit/**`
-- `tools/dotnet-sdd-guard/**`
-- `tools/openspec-sdd-harness/**`
-- `scripts/Invoke-OpenSpecSddGuard.ps1`
-- `.github/workflows/openspec-dotnet-sdd-verify.yml`
-- `distribution/openspec/dotnet-sdd/**`
-- `AGENTS.md`, `README.md`, and this report.
+### Guard and CI
 
-## Files modified
+`OPENAPI001` considers only contracts under:
 
-- `.github/copilot-instructions.md`
-- `.gitignore`
-- `docs/MCP-SETUP.md`
-- Three surviving `PoCFinal` project files were restored to their implemented `c3b3349` blobs.
+- `openspec/specs/**/contracts/openapi.yaml`;
+- non-archived `openspec/changes/**/specs/**/contracts/openapi.yaml`; and
+- `docs/contracts/**/openapi.yaml`.
 
-## Files restored from Git history
+The guard does not traverse `docs/sdd-history/` or `legacy/` for active contracts. An HTTP application without an active contract fails; a non-HTTP project without a contract is `NOT_APPLICABLE`; existing baseline contracts are still linted even when a change does not affect HTTP.
 
-The complete solution and 35 application files were restored from `c3b3349`: server bootstrap/configuration, Common Presentation, ContactRequests Domain/Application/Infrastructure/Presentation projects and sources, unit tests, and `PoCFinal.sln`. A blob comparison confirms all 35 match that commit exactly.
+The workflow retains `pull_request`, adds manual dispatch and pushes to `chore/migrate-speckit-to-openspec`, lints the active contract, installs exact OpenSpec and Redocly versions, uses `global.json` for .NET SDK `10.0.302`, and pins the four requested GitHub actions by full commit SHA with readable tag comments.
 
-## Files moved out of active paths
+### Instructions and local-environment scanning
 
-- `dotnet-sdd/`, `dotnet-sdd-feature/`, `dotnet-sdd-guard/`, `dotnet-sdd-harness/`, and `dotnet-sdd-bundle/` → `legacy/spec-kit/`.
-- Former root `speckit-*` skills → `legacy/spec-kit/github-skills/`.
-- Former catalogs, artifacts, scripts, README, and results → `legacy/spec-kit/distribution/`.
-- Feature source, checklists, contract, design artifacts, tasks, implementation evidence, guard reports, and coverage → `docs/sdd-history/spec-kit/001-registrar-contacto/`.
-- Historical constitution → `docs/sdd-history/spec-kit/constitution.md`.
+The unsupported nested `PoCFinal/.github/copilot-instructions.md` was moved to `.github/instructions/pocfinal.instructions.md` with `applyTo: "PoCFinal/**"`. It concisely links the canonical governance and records the .NET 10, modular-monolith, four-layer, Minimal API, Wolverine `MediatorOnly`, Repository Pattern, FluentValidation, Problem Details, active OpenAPI, and guard requirements.
 
-## Files removed
+The repository guard and reusable installer detect both Windows path separator forms plus file URLs and loopback-host markers. Test fixtures construct these markers only in isolated temporary directories so documentation of scanner patterns does not create false positives.
 
-- All active root `speckit-*` skill paths and former preset/workflow/extension/bundle/catalog paths were removed through the moves above.
-- Three duplicate ZIP copies under the historical bundle `dist/` directory were removed after SHA-256 equality was verified; canonical copies remain under `legacy/spec-kit/distribution/artifacts/`.
-- No user-authored feature or governance artifact was deleted without first being preserved.
+## Commit-history decision
 
-## Spec Kit and OpenSpec capability differences
+The preexisting remote migration commit combines application restoration, OpenSpec migration, reusable distribution, harness, and CI. Rewriting it locally would diverge from an existing remote branch and would require a coordinated force push. In accordance with the review constraints, the remote history was preserved and these findings are addressed in a separate `fix` commit.
 
-| Previous capability | OpenSpec treatment |
-|---|---|
-| Preset composition | Project-local schema plus `openspec/config.yaml` context and artifact rules. |
-| Workflow registry and run state | Schema dependency graph and CLI status. The old run-state model is not simulated. |
-| Extensions and hooks | No automatic equivalent is claimed; the deterministic gate is invoked explicitly by skill, script, and CI. |
-| Bundles and remote catalogs | Plain source package plus `install.ps1`; no active catalog or ZIP distribution. |
-| Phase-specific commands | OPSX actions generated by the CLI. Codex consumes skills; Copilot consumes skills and prompt commands. |
-| Completed feature directory | Durable baseline capability under `openspec/specs/`; complete generation history remains in documentation history. |
-| Constitution command | Canonical repository governance document injected concisely through config context and artifact rules. |
+The desired complete conceptual split remains:
 
-## Design decisions
+1. `restore: recover implemented PoCFinal application`
+2. `migrate: replace active Spec Kit workflow with OpenSpec`
+3. `feat: add reusable OpenSpec distribution and deterministic verification`
+4. `fix: address OpenSpec migration review findings`
 
-1. Keep exactly one active root OpenSpec project; the distribution directory is package content, not a second initialized project.
-2. Preserve native OpenSpec delta semantics for `specs/**/*.md`; the durable baseline uses `## Requirements`, while change deltas use the official ADDED/MODIFIED/REMOVED/RENAMED operations.
-3. Model research and pre-task review as schema artifacts, with tasks gated on specs, design, and review.
-4. Keep the full governance policy in one document and inject only concise context/rules into OpenSpec.
-5. Recover application blobs from the implemented commit because the initial `HEAD` had already deleted the application; do not redesign or alter behavior during migration.
-6. Treat the deterministic guard as an explicit command because OpenSpec does not provide the previous automatic hook contract.
-7. Correct the inherited guard's false positive for same-module `Presentation → Infrastructure`, which the canonical constitution explicitly allows, while retaining cross-module and Common-layer prohibitions.
-8. Replace workflow-state attachment with a sanitized evaluation of explicit gate results rather than pretending OpenSpec exposes the same run model.
-9. Refuse installer collisions before OpenSpec initialization; permit replacement only with explicit adjacent backups.
+Achieving the first three commits as separate historical commits requires explicit coordination before any history rewrite. This correction does not perform or authorize a force push.
+
+## Files created by the correction
+
+- `.github/instructions/pocfinal.instructions.md`
+- `distribution/openspec/dotnet-sdd/config/config.yaml`
+- `distribution/openspec/dotnet-sdd/docs/dotnet-sdd-governance.md`
+- `global.json`
+- `openspec/specs/contact-requests/contracts/openapi.yaml`
+
+## Files moved or removed by the correction
+
+- Removed unsupported `PoCFinal/.github/copilot-instructions.md`; its applicable content now lives in `.github/instructions/pocfinal.instructions.md`.
+
+## Principal files modified by the correction
+
+- Distribution installer, wrapper, guard payload, tests, and README.
+- Repository guard engine, wrapper, and guard tests.
+- OpenSpec capability spec and workflow documentation.
+- CI workflow, repository instructions, Copilot instructions, root README, and this report.
+
+No restored `PoCFinal` application source file was modified. The two local-only `applicationUrl` entries were removed from `launchSettings.json` so the required loopback scan has no active exception; endpoint behavior and implementation remain unchanged.
 
 ## Validation results
 
 | Validation | Result |
 |---|---|
-| `openspec --version` | `1.7.0`. |
-| `openspec schema validate dotnet-sdd --verbose` | Passed; syntax, templates, and dependency graph valid. |
-| `openspec schema which dotnet-sdd` | Resolves from project `openspec/schemas/dotnet-sdd`. |
-| `openspec templates --schema dotnet-sdd` | Six templates resolved. |
-| `openspec validate --specs --strict` | Baseline `contact-requests` passed. |
-| `openspec validate --all --strict` | Passed. |
-| Restore | Passed for `PoCFinal/PoCFinal.sln`. |
-| Release build | Passed with 0 warnings and 0 errors under `-warnaserror`. |
-| Unit tests | Passed 11/11, 0 failed, 0 skipped. |
-| Business line coverage | Passed at 93.75% for Domain/Application. |
-| OpenAPI | One preserved contract passed Redocly CLI `2.41.1` with exit code 0 and two warnings already present in the historical contract: missing license URL and placeholder `example.com` server. Runtime equivalence is not claimed by lint alone. |
-| Deterministic guard | PASS; all hard checks passed. `EXC001` remains advisory because handler composition order is not mechanically provable. |
-| Guard tests | Passed 22/22. |
-| Migrated harness tests | Passed 4/4. |
-| Installer tests | Passed 5/5: clean install, idempotency, collision, secret/path audit, and minimal guard fixture. |
-| Skill validation | Passed with the official `skill-creator` validator after installing PyYAML only in the local authoring environment. |
-| Application blob comparison | 35/35 application files exactly match `c3b3349`. |
-| Active legacy-reference search | No matches outside the two historical trees and this report. |
-| Secret/local absolute-path scan | Passed. |
+| `openspec --version` | PASS: `1.7.0`. |
+| `openspec schemas` | PASS: project `dotnet-sdd` and built-in `spec-driven` listed. |
+| `openspec schema which dotnet-sdd` | PASS: project-local schema resolved. |
+| `openspec schema validate dotnet-sdd --verbose` | PASS. |
+| `openspec templates --schema dotnet-sdd` | PASS: six templates resolved. |
+| `openspec validate --specs --strict` | PASS: 1/1. |
+| `openspec validate --all --strict` | PASS: 1/1. |
+| `dotnet --version` | PASS: `10.0.302`. |
+| `dotnet restore PoCFinal/PoCFinal.sln` | PASS. |
+| Release build with `-warnaserror` | PASS: 0 warnings, 0 errors. |
+| Solution tests | PASS: 11 passed, 0 failed, 0 skipped. |
+| Active OpenAPI lint with Redocly `2.41.1` | PASS with one license warning; no license exists to declare. |
+| Deterministic guard | PASS: 16 checks passed, 0 failed, 1 advisory (`EXC001`). |
+| Guard tests | PASS: 29/29. |
+| OpenSpec harness tests | PASS: 4/4. |
+| Installer tests | PASS: 11/11. |
+| Local path/loopback audit | PASS: matches remain only in immutable historical trees. |
+| Active Spec Kit reference audit | PASS: matches remain only in immutable historical trees and this migration report. |
+| `git diff --check` | PASS. |
+| Local validation | PASS. |
+| GitHub Actions validation | NOT RUN. Local results are not represented as a GitHub Actions run. |
 
-## Commands executed
+## Required command surfaces
 
-Principal commands included:
-
-```powershell
-git status --short
-git branch --show-current
-git rev-parse --show-toplevel
-git switch -c chore/migrate-speckit-to-openspec
-dotnet --info
-npm install -g @fission-ai/openspec@latest
-openspec init . --tools 'codex,github-copilot' --force --no-animation
-openspec update
-openspec schema fork spec-driven dotnet-sdd
-openspec schema validate dotnet-sdd --verbose
-openspec schema which dotnet-sdd
-openspec templates --schema dotnet-sdd
-openspec validate --specs --strict
-openspec validate --all --strict
-dotnet restore PoCFinal/PoCFinal.sln
-dotnet build PoCFinal/PoCFinal.sln -c Release --no-restore -warnaserror
-dotnet test PoCFinal/Modules/ContactRequests/Tests/ContactRequests.Test/ContactRequests.UnitTests.csproj -c Release --no-build --collect:'XPlat Code Coverage'
-npx --yes @redocly/cli@2.41.1 lint docs/sdd-history/spec-kit/001-registrar-contacto/contracts/openapi.yaml
-./scripts/Invoke-OpenSpecSddGuard.ps1
-./tools/dotnet-sdd-guard/tests/Invoke-GuardTests.ps1
-./tools/openspec-sdd-harness/tests/Invoke-HarnessTests.ps1
-./distribution/openspec/dotnet-sdd/tests/Invoke-InstallerTests.ps1
-git diff --check
-```
-
-## Preexisting failures and migration corrections
-
-- `CS5001` and zero discovered tests were caused by the prior `b85e668` deletion. Restoring the exact implemented blobs corrected the repository state.
-- The former clean-install bundle simulation failed before migration because its workflow development source did not resolve the required workflow file. That obsolete distribution is historical only.
-- The knowledge graph initially reflected older removed sources; it was re-indexed after application restoration before architecture inspection.
-- A first OpenSpec initialization attempt passed an unquoted comma list through PowerShell and was rejected without writing files. The quoted invocation succeeded.
-- The migrated guard initially inherited strict-mode-unsafe XML property access and an architecture rule inconsistent with governance. XPath-based parsing and the authorized same-module Presentation dependency corrected both; all guard tests and the full gate then passed.
-
-## Remaining risks and work
-
-- `EXC001` is advisory: the guard found both specific and fallback exception handlers but cannot prove runtime registration precedence mechanically. Existing unit tests pass; a future integration test may provide stronger evidence if that later-SDLC control enters scope.
-- The preserved OpenAPI document produces two Redocly recommended-rule warnings (license URL and placeholder server). The required pinned lint exits zero; changing historical authored evidence was intentionally avoided.
-- OpenAPI lint proves document validity, not runtime contract equivalence. The restored implementation matches the accepted commit, but future changes must maintain explicit contract-to-code review.
-- The global OpenSpec installation used during migration is environment state. CI and the reusable package use pinned/reproducible versions; developers should install the documented pin.
-
-## Next change
-
-In Codex, start a new change with:
+Codex:
 
 ```text
-$openspec-propose "describe the change"
+$openspec-propose
+$openspec-explore
+$openspec-update-change
+$openspec-apply-change
+$openspec-sync-specs
+$openspec-archive-change
 ```
 
-In GitHub Copilot chat, use `/opsx-propose`. Terminal commands are for OpenSpec state and validation, not Codex slash-command emulation.
+GitHub Copilot:
+
+```text
+/opsx-propose
+/opsx-explore
+/opsx-update
+/opsx-apply
+/opsx-sync
+/opsx-archive
+```
+
+Deterministic gate:
+
+```powershell
+./scripts/Invoke-OpenSpecSddGuard.ps1
+```

@@ -1,0 +1,38 @@
+schema: dotnet-sdd
+
+context: |
+  This project uses .NET 10 and the repository-local dotnet-sdd schema.
+  Keep observable behavior in specifications and implementation choices in
+  research and design. The complete authority is
+  docs/architecture/dotnet-sdd-governance.md.
+
+rules:
+  proposal:
+    - Define problem, motivation, scope, exclusions, affected capabilities, compatibility, principal risks, and impacts on contracts, persistence, security, privacy, and operations.
+    - Do not invent functional requirements or select implementation details.
+  specs:
+    - Describe observable behavior only, using MUST or SHALL and canonical Requirement and Scenario headings.
+    - Keep framework, persistence, endpoint-class, and library choices out of behavioral specifications.
+    - Preserve privacy, limits, errors, duplicate behavior, atomicity, and compatibility decisions explicitly.
+  research:
+    - Use official primary documentation and record links, access dates, alternatives, rationale, resolved uncertainty, and relevant pinned versions.
+    - Separate verified facts from inferences and leave no design-changing uncertainty unresolved.
+  design:
+    - Cover architecture, dependencies, domain, persistence, HTTP and OpenAPI, validation, errors, observability, security, tests, risks, validation commands, and rollback where applicable.
+    - Link optional data model, OpenAPI, or quickstart documents rather than making them mandatory for every change.
+    - Apply every applicable rule in docs/architecture/dotnet-sdd-governance.md without weakening it.
+  review:
+    - Review cross-document coherence, HTTP semantics, atomicity, concurrency, limits, errors, security, privacy, performance, observability, traceability, and required Definition of Done evidence.
+    - Use NOT READY FOR TASKS whenever a material conflict, gap, or clarification remains.
+  tasks:
+    - Produce dependency-ordered checkbox tasks with sequential IDs, concrete paths, associated tests, exact verification commands, and observable completion criteria.
+    - Do not convert unresolved decisions into implementation assumptions or use generic tasks.
+
+operations:
+  apply:
+    guidance:
+      - Preserve existing behavior unless an approved capability delta explicitly changes it.
+      - Run ./scripts/Invoke-OpenSpecSddGuard.ps1 before claiming completion and report every failing check.
+  archive:
+    guidance:
+      - Archive only after capability specs are synchronized and required verification evidence is complete.
