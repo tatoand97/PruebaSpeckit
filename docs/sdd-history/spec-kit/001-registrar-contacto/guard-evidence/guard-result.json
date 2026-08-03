@@ -1,0 +1,153 @@
+{
+  "schemaVersion": "1.0",
+  "guard": {
+    "id": "dotnet-sdd-guard",
+    "version": "1.0.0"
+  },
+  "result": "PASS",
+  "checks": [
+    {
+      "id": "SDK001",
+      "category": "sdk",
+      "status": "PASS",
+      "severity": "HARD",
+      "message": ".NET 10 target is configured.",
+      "evidence": "SDK/framework declarations are consistent."
+    },
+    {
+      "id": "ARCH001",
+      "category": "architecture",
+      "status": "PASS",
+      "severity": "HARD",
+      "message": "Project reference direction is valid.",
+      "evidence": "No prohibited ProjectReference edges found."
+    },
+    {
+      "id": "PERSIST001",
+      "category": "persistence",
+      "status": "PASS",
+      "severity": "HARD",
+      "message": "Persistence ownership is valid.",
+      "evidence": "No prohibited persistence API/package found outside Infrastructure."
+    },
+    {
+      "id": "MIG001",
+      "category": "persistence",
+      "status": "PASS",
+      "severity": "HARD",
+      "message": "No EF Core migrations or substitute initialization detected.",
+      "evidence": "Prohibited markers were absent."
+    },
+    {
+      "id": "WOLV001",
+      "category": "messaging",
+      "status": "PASS",
+      "severity": "HARD",
+      "message": "Wolverine dependency is present.",
+      "evidence": "WolverineFx marker found."
+    },
+    {
+      "id": "WOLV002",
+      "category": "messaging",
+      "status": "PASS",
+      "severity": "HARD",
+      "message": "Wolverine is configured as mediator-only.",
+      "evidence": "MediatorOnly marker found."
+    },
+    {
+      "id": "WOLV003",
+      "category": "messaging",
+      "status": "PASS",
+      "severity": "HARD",
+      "message": "No distributed Wolverine transport package was detected.",
+      "evidence": "No explicit prohibited transport marker found."
+    },
+    {
+      "id": "AZURE001",
+      "category": "configuration",
+      "status": "PASS",
+      "severity": "HARD",
+      "message": "Azure App Configuration preparation is present.",
+      "evidence": "Required package/API markers and external endpoint handling were checked without contacting Azure."
+    },
+    {
+      "id": "HTTP001",
+      "category": "http",
+      "status": "PASS",
+      "severity": "HARD",
+      "message": "Problem Details infrastructure is present.",
+      "evidence": "HTTP error-handling markers were checked."
+    },
+    {
+      "id": "HTTP002",
+      "category": "http",
+      "status": "PASS",
+      "severity": "HARD",
+      "message": "Minimal API patterns are present.",
+      "evidence": "Minimal API mapping marker found and no controller architecture marker found."
+    },
+    {
+      "id": "PERSIST002",
+      "category": "persistence",
+      "status": "PASS",
+      "severity": "ADVISORY",
+      "message": "Repository abstraction marker is present.",
+      "evidence": "A conventional repository marker was found."
+    },
+    {
+      "id": "EXC001",
+      "category": "exceptions",
+      "status": "PASS",
+      "severity": "ADVISORY",
+      "message": "No exception ownership advisory was detected.",
+      "evidence": "Module exception and Presentation markers were compared."
+    },
+    {
+      "id": "RESTORE001",
+      "category": "build",
+      "status": "PASS",
+      "severity": "HARD",
+      "message": "dotnet restore succeeded.",
+      "evidence": "Exit code was evaluated; command output is not exported."
+    },
+    {
+      "id": "BUILD001",
+      "category": "build",
+      "status": "PASS",
+      "severity": "HARD",
+      "message": "Release build succeeded with warnings treated as errors.",
+      "evidence": "Build used -warnaserror; output is not exported."
+    },
+    {
+      "id": "TEST001",
+      "category": "tests",
+      "status": "PASS",
+      "severity": "HARD",
+      "message": "Unit test execution succeeded.",
+      "evidence": "executed=22; passed=22; failed=0; skipped=0"
+    },
+    {
+      "id": "COV001",
+      "category": "coverage",
+      "status": "PASS",
+      "severity": "HARD",
+      "message": "Business line coverage meets the 80% threshold.",
+      "evidence": "lineCoveragePercent=93.75"
+    },
+    {
+      "id": "OPENAPI001",
+      "category": "openapi",
+      "status": "PASS",
+      "severity": "HARD",
+      "message": "Version-pinned Redocly lint succeeded.",
+      "evidence": "1 contract(s) checked; runtime equivalence was not claimed."
+    }
+  ],
+  "configurationErrors": [],
+  "summary": {
+    "passed": 17,
+    "failed": 0,
+    "advisory": 0,
+    "notApplicable": 0
+  }
+}

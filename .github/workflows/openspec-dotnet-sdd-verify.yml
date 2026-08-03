@@ -1,0 +1,77 @@
+name: OpenSpec .NET SDD Verify
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.16.0
+
+      - name: Install pinned OpenSpec
+        shell: pwsh
+        run: npm install --global @fission-ai/openspec@1.7.0
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Validate OpenSpec
+        shell: pwsh
+        run: openspec validate --all --strict
+
+      - name: Restore
+        shell: pwsh
+        run: dotnet restore PoCFinal/PoCFinal.sln
+
+      - name: Build Release with zero warnings
+        shell: pwsh
+        run: dotnet build PoCFinal/PoCFinal.sln -c Release --no-restore -warnaserror
+
+      - name: Unit tests and coverage
+        shell: pwsh
+        run: >-
+          dotnet test
+          PoCFinal/Modules/ContactRequests/Tests/ContactRequests.Test/ContactRequests.UnitTests.csproj
+          -c Release --no-build
+          --collect:"XPlat Code Coverage"
+          --results-directory PoCFinal/TestResults
+          -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura
+
+      - name: Lint preserved OpenAPI contract
+        shell: pwsh
+        run: >-
+          npx --yes @redocly/cli@2.41.1 lint
+          docs/sdd-history/spec-kit/001-registrar-contacto/contracts/openapi.yaml
+
+      - name: Run deterministic gate
+        shell: pwsh
+        run: ./scripts/Invoke-OpenSpecSddGuard.ps1
+
+      - name: Test guard, harness, and installer
+        shell: pwsh
+        run: |
+          ./tools/dotnet-sdd-guard/tests/Invoke-GuardTests.ps1
+          ./tools/openspec-sdd-harness/tests/Invoke-HarnessTests.ps1
+          ./distribution/openspec/dotnet-sdd/tests/Invoke-InstallerTests.ps1
+
+      - name: Upload guard evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dotnet-sdd-guard-evidence
+          path: PoCFinal/artifacts/sdd-guard/
+          if-no-files-found: warn

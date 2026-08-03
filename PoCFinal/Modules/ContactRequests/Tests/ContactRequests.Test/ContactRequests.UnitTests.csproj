@@ -22,4 +22,10 @@
     <Using Include="Xunit" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\..\Domain\ContactRequests.Domain.csproj" />
+    <ProjectReference Include="..\..\Application\ContactRequests.Application.csproj" />
+    <ProjectReference Include="..\..\Presentation\ContactRequests.Presentation.csproj" />
+  </ItemGroup>
+
 </Project>
