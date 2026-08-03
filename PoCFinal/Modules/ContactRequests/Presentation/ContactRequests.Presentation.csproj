@@ -1,9 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
-    <ProjectReference Include="..\Infrastructure\ContactRequests.Infrastructure.csproj" />
-    <ProjectReference Include="..\..\..\Common\Common.Presentation\Common.Presentation.csproj" />
-  </ItemGroup>
+</ItemGroup>
 
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
