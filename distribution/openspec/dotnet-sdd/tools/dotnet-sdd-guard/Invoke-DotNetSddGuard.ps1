@@ -389,9 +389,9 @@ function Get-Exc001Severity {
 }
 
 function New-RunResultsRoot {
-    param([string]$Root)
+    param([string]$EvidenceRoot)
 
-    $rawRoot = Join-Path $Root 'artifacts/sdd-guard/raw'
+    $rawRoot = Join-Path $EvidenceRoot 'raw'
     New-Item -ItemType Directory -Path $rawRoot -Force | Out-Null
     $runId = Get-Date -Format 'yyyyMMddHHmmssfff'
     $runRoot = Join-Path $rawRoot ("run-" + $runId + "-" + [guid]::NewGuid().ToString('N').Substring(0, 8))
@@ -477,8 +477,7 @@ function Get-TestCounts {
 }
 
 function Write-GuardReport {
-    param([string]$Root)
-    $artifactRoot = Join-Path $Root 'artifacts/sdd-guard'
+    param([string]$ArtifactRoot)
     New-Item -ItemType Directory -Path $artifactRoot -Force | Out-Null
     $failed = @($script:Checks | Where-Object { $_.severity -eq 'HARD' -and $_.status -eq 'FAIL' }).Count
     $result = if ($script:ConfigurationErrors.Count -gt 0) { 'ERROR' } elseif ($failed -gt 0) { 'FAIL' } else { 'PASS' }
@@ -524,15 +523,15 @@ $resolvedContractRoot = if ([string]::IsNullOrWhiteSpace($ContractRoot)) {
 } else {
     [System.IO.Path]::GetFullPath($ContractRoot)
 }
-$evidence = $null
+$resolvedEvidenceRoot = if ([string]::IsNullOrWhiteSpace($EvidencePath)) {
+    Join-Path $resolvedRoot 'artifacts/sdd-guard'
+} else {
+    [System.IO.Path]::GetFullPath($EvidencePath)
+}
 try {
     if (-not (Test-Path -LiteralPath $resolvedRoot -PathType Container)) {
         throw 'Project root does not exist.'
     }
-    if ($EvidencePath) {
-        $evidence = Get-Content -LiteralPath $EvidencePath -Raw | ConvertFrom-Json
-    }
-
     $solution = Resolve-Solution $resolvedRoot
     $files = @(Get-SafeFiles $resolvedRoot)
     $implementationFiles = @(Get-ImplementationFiles $resolvedRoot)
@@ -658,48 +657,40 @@ try {
     Add-Check 'EXC001' 'exceptions' $exceptionCheck.status $exceptionSeverity $exceptionCheck.message $exceptionCheck.evidence
 
     if ($solution) {
-        $resultsRoot = New-RunResultsRoot $resolvedRoot
+        $resultsRoot = New-RunResultsRoot $resolvedEvidenceRoot
         $testProjectCount = 0
-        if ($evidence) {
-            $restoreOk = [bool]$evidence.restore
-            $buildOk = [bool]$evidence.build
-            $testOk = [bool]$evidence.tests.ok
-            $testCounts = $evidence.tests.counts
-            $coverage = if ($null -ne $evidence.coverage) { [double]$evidence.coverage } else { $null }
-        } else {
-            $restore = Invoke-External 'dotnet' @('restore', $solution.FullName) $resolvedRoot
-            $restoreOk = $restore.exitCode -eq 0
-            $build = Invoke-External 'dotnet' @('build', $solution.FullName, '-c', 'Release', '--no-restore', '-warnaserror') $resolvedRoot
-            $buildOk = $build.exitCode -eq 0
+        $restore = Invoke-External 'dotnet' @('restore', $solution.FullName) $resolvedRoot
+        $restoreOk = $restore.exitCode -eq 0
+        $build = Invoke-External 'dotnet' @('build', $solution.FullName, '-c', 'Release', '--no-restore', '-warnaserror') $resolvedRoot
+        $buildOk = $build.exitCode -eq 0
+        $unitTestProjects = @($projects | Where-Object {
+            ($_.BaseName -match '(^|\.)UnitTests$' -or $_.FullName -match '[\\/]UnitTests[\\/]') -and
+            $_.BaseName -notmatch '(Integration|Performance|E2E|Acceptance)'
+        })
+        if ($unitTestProjects.Count -eq 0) {
             $unitTestProjects = @($projects | Where-Object {
-                ($_.BaseName -match '(^|\.)UnitTests$' -or $_.FullName -match '[\\/]UnitTests[\\/]') -and
+                $_.FullName -match '[\\/]tests?[\\/]' -and
                 $_.BaseName -notmatch '(Integration|Performance|E2E|Acceptance)'
             })
-            if ($unitTestProjects.Count -eq 0) {
-                $unitTestProjects = @($projects | Where-Object {
-                    $_.FullName -match '[\\/]tests?[\\/]' -and
-                    $_.BaseName -notmatch '(Integration|Performance|E2E|Acceptance)'
-                })
-            }
-            $testProjectCount = $unitTestProjects.Count
-            $testOk = $unitTestProjects.Count -gt 0
-            if (-not $testOk) {
-                Add-ConfigError 'No unambiguous UnitTests project was found.'
-            }
-            $testIndex = 0
-            foreach ($unitProject in $unitTestProjects) {
-                $testIndex++
-                $test = Invoke-External 'dotnet' @(
-                    'test', $unitProject.FullName, '-c', 'Release', '--no-build',
-                    '--logger', "trx;LogFilePrefix=sdd-guard-$testIndex", '--results-directory', $resultsRoot,
-                    '--collect:XPlat Code Coverage',
-                    '--', 'DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura'
-                ) $resolvedRoot
-                if ($test.exitCode -ne 0) { $testOk = $false }
-            }
-            $testCounts = Get-TestCounts $resultsRoot
-            $coverage = Get-Coverage $resultsRoot
         }
+        $testProjectCount = $unitTestProjects.Count
+        $testOk = $unitTestProjects.Count -gt 0
+        if (-not $testOk) {
+            Add-ConfigError 'No unambiguous UnitTests project was found.'
+        }
+        $testIndex = 0
+        foreach ($unitProject in $unitTestProjects) {
+            $testIndex++
+            $test = Invoke-External 'dotnet' @(
+                'test', $unitProject.FullName, '-c', 'Release', '--no-build',
+                '--logger', "trx;LogFilePrefix=sdd-guard-$testIndex", '--results-directory', $resultsRoot,
+                '--collect:XPlat Code Coverage',
+                '--', 'DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura'
+            ) $resolvedRoot
+            if ($test.exitCode -ne 0) { $testOk = $false }
+        }
+        $testCounts = Get-TestCounts $resultsRoot
+        $coverage = Get-Coverage $resultsRoot
         Add-Check 'RESTORE001' 'build' $(if ($restoreOk) { 'PASS' } else { 'FAIL' }) 'HARD' `
             $(if ($restoreOk) { 'dotnet restore succeeded.' } else { 'dotnet restore failed.' }) 'Exit code was evaluated; command output is not exported.'
         Add-Check 'BUILD001' 'build' $(if ($buildOk) { 'PASS' } else { 'FAIL' }) 'HARD' `
@@ -724,13 +715,9 @@ try {
             }
         } else {
             $openApiOk = $true
-            if ($evidence -and $null -ne $evidence.openapi) {
-                $openApiOk = [bool]$evidence.openapi
-            } else {
-                foreach ($contract in $openApis) {
-                    $lint = Invoke-External 'npx' @('--yes', '@redocly/cli@2.41.1', 'lint', $contract.FullName) $resolvedRoot
-                    if ($lint.exitCode -ne 0) { $openApiOk = $false }
-                }
+            foreach ($contract in $openApis) {
+                $lint = Invoke-External 'npx' @('--yes', '@redocly/cli@2.41.1', 'lint', $contract.FullName) $resolvedRoot
+                if ($lint.exitCode -ne 0) { $openApiOk = $false }
             }
             Add-Check 'OPENAPI001' 'openapi' $(if ($openApiOk) { 'PASS' } else { 'FAIL' }) 'HARD' `
                 $(if ($openApiOk) { 'Version-pinned Redocly lint succeeded.' } else { 'Version-pinned Redocly lint failed.' }) `
@@ -746,7 +733,7 @@ catch {
     }
 }
 
-$finalResult = Write-GuardReport $resolvedRoot
+$finalResult = Write-GuardReport $resolvedEvidenceRoot
 Write-Output ".NET SDD Guard: $finalResult"
 switch ($finalResult) {
     'PASS' { exit 0 }

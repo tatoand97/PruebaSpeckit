@@ -69,6 +69,7 @@ try {
             'openspec/schemas/dotnet-sdd/schema.yaml',
             'docs/architecture/dotnet-sdd-governance.md',
             'tools/dotnet-sdd-guard/Invoke-DotNetSddGuard.ps1',
+            'tools/dotnet-sdd-guard/README.md',
             'scripts/Invoke-OpenSpecSddGuard.ps1',
             '.codex/skills/dotnet-sdd-verify/SKILL.md',
             '.github/skills/dotnet-sdd-verify/SKILL.md'
@@ -79,7 +80,8 @@ try {
             throw 'dotnet-sdd was not selected in config.yaml'
         }
         $distributedConfig = Get-Content -LiteralPath (Join-Path $clean 'openspec/config.yaml') -Raw
-        if ($distributedConfig -match 'PoCFinal|[A-Za-z]:[\\/]Users[\\/]') {
+        $removedApplicationMarker = 'PoC' + 'Final'
+        if ($distributedConfig -match $removedApplicationMarker -or $distributedConfig -match '[A-Za-z]:[\\/]Users[\\/]') {
             throw 'installed config is not reusable'
         }
     }
@@ -246,10 +248,42 @@ try {
         New-Item -ItemType Directory -Path (Join-Path $fixture 'src/Fixture.Domain') -Force | Out-Null
         Set-Content -LiteralPath (Join-Path $fixture 'src/Fixture.Domain/Fixture.Domain.csproj') -Encoding utf8NoBOM -Value '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>'
         Set-Content -LiteralPath (Join-Path $fixture 'src/Fixture.Domain/Entity.cs') -Encoding utf8NoBOM -Value 'namespace Fixture.Domain; public sealed class Entity { public int Id { get; init; } }'
-        $evidence = @{ restore = $true; build = $true; tests = @{ ok = $true; counts = @{ executed = 1; passed = 1; failed = 0; skipped = 0 } }; coverage = 100; openapi = $true } | ConvertTo-Json -Depth 5
-        Set-Content -LiteralPath (Join-Path $fixture 'evidence.json') -Value $evidence -Encoding utf8NoBOM
-        & (Join-Path $clean 'tools/dotnet-sdd-guard/Invoke-DotNetSddGuard.ps1') -ProjectRoot $fixture -EvidencePath (Join-Path $fixture 'evidence.json')
-        if ($LASTEXITCODE -ne 0) { throw "guard exit $LASTEXITCODE" }
+        New-Item -ItemType Directory -Path (Join-Path $fixture 'tests/Fixture.UnitTests') -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $fixture 'tests/Fixture.UnitTests/Fixture.UnitTests.csproj') -Encoding utf8NoBOM -Value '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>'
+        $dotnetMock = Join-Path $fixture 'dotnet-mock.ps1'
+        Set-Content -LiteralPath $dotnetMock -Encoding utf8NoBOM -Value @'
+$command = if ($args.Count -gt 0) { $args[0] } else { '' }
+if ($command -eq 'test') {
+    $resultsDirectory = $null
+    for ($index = 0; $index -lt $args.Count; $index++) {
+        if ($args[$index] -eq '--results-directory') { $resultsDirectory = $args[$index + 1]; break }
+    }
+    New-Item -ItemType Directory -Path $resultsDirectory -Force | Out-Null
+    Set-Content -LiteralPath (Join-Path $resultsDirectory 'results.trx') -Encoding utf8 -Value '<?xml version="1.0"?><TestRun><ResultSummary><Counters executed="1" passed="1" failed="0" notExecuted="0" /></ResultSummary></TestRun>'
+    Set-Content -LiteralPath (Join-Path $resultsDirectory 'coverage.cobertura.xml') -Encoding utf8 -Value '<?xml version="1.0"?><coverage><packages><package name="Fixture.Domain"><classes><class><lines><line number="1" hits="1" /></lines></class></classes></package></packages></coverage>'
+}
+exit 0
+'@
+        $previousMock = [Environment]::GetEnvironmentVariable('SDD_GUARD_DOTNET_PATH', 'Process')
+        $evidenceRoot = Join-Path $fixture 'custom-evidence'
+        try {
+            [Environment]::SetEnvironmentVariable('SDD_GUARD_DOTNET_PATH', $dotnetMock, 'Process')
+            & (Join-Path $clean 'tools/dotnet-sdd-guard/Invoke-DotNetSddGuard.ps1') -ProjectRoot $fixture -EvidencePath $evidenceRoot -VerboseDiagnostics
+            if ($LASTEXITCODE -ne 0) {
+                $report = Get-Content -LiteralPath (Join-Path $evidenceRoot 'guard-result.json') -Raw | ConvertFrom-Json
+                $failedChecks = @($report.checks | Where-Object { $_.status -eq 'FAIL' } | ForEach-Object { $_.id }) -join ','
+                throw "guard exit $LASTEXITCODE; result=$($report.result); failed=$failedChecks; configurationErrors=$($report.configurationErrors.Count)"
+            }
+        }
+        finally {
+            [Environment]::SetEnvironmentVariable('SDD_GUARD_DOTNET_PATH', $previousMock, 'Process')
+        }
+        if (-not (Test-Path -LiteralPath (Join-Path $evidenceRoot 'guard-result.json') -PathType Leaf)) {
+            throw 'custom evidence output was not generated'
+        }
+        if (Test-Path -LiteralPath (Join-Path $fixture 'artifacts/sdd-guard/guard-result.json')) {
+            throw 'default evidence location was used despite an explicit output path'
+        }
     }
 } finally {
     $resolved = [IO.Path]::GetFullPath($testRoot)

@@ -1,9 +1,9 @@
 schema: dotnet-sdd
 
 context: |
-  This project uses .NET 10 and the repository-local dotnet-sdd schema.
-  Keep observable behavior in specifications and implementation choices in
-  research and design. The complete authority is
+  This project uses the reusable dotnet-sdd workflow for governed .NET development.
+  Keep observable behavior in specifications and implementation choices in research
+  and design. The complete architecture and quality policy is located at
   docs/architecture/dotnet-sdd-governance.md.
 
 rules:

@@ -1,4 +1,4 @@
-name: OpenSpec .NET SDD Verify
+name: OpenSpec .NET SDD Package Verify
 
 on:
   pull_request:
@@ -28,54 +28,60 @@ jobs:
         shell: pwsh
         run: npm install --global @fission-ai/openspec@1.7.0
 
-      - name: Set up .NET 10
+      - name: Set up .NET 10 for guard fixtures
         uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
         with:
           global-json-file: global.json
 
-      - name: Validate OpenSpec
-        shell: pwsh
-        run: openspec validate --all --strict
-
-      - name: Restore
-        shell: pwsh
-        run: dotnet restore PoCFinal/PoCFinal.sln
-
-      - name: Build Release with zero warnings
-        shell: pwsh
-        run: dotnet build PoCFinal/PoCFinal.sln -c Release --no-restore -warnaserror
-
-      - name: Unit tests and coverage
-        shell: pwsh
-        run: >-
-          dotnet test
-          PoCFinal/Modules/ContactRequests/Tests/ContactRequests.Test/ContactRequests.UnitTests.csproj
-          -c Release --no-build
-          --collect:"XPlat Code Coverage"
-          --results-directory PoCFinal/TestResults
-          -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura
-
-      - name: Lint active OpenAPI contract
-        shell: pwsh
-        run: >-
-          npx --yes @redocly/cli@2.41.1 lint
-          openspec/specs/contact-requests/contracts/openapi.yaml
-
-      - name: Run deterministic gate
-        shell: pwsh
-        run: ./scripts/Invoke-OpenSpecSddGuard.ps1
-
-      - name: Test guard, harness, and installer
+      - name: Validate schema and strict OpenSpec state
         shell: pwsh
         run: |
-          ./tools/dotnet-sdd-guard/tests/Invoke-GuardTests.ps1
-          ./tools/openspec-sdd-harness/tests/Invoke-HarnessTests.ps1
-          ./distribution/openspec/dotnet-sdd/tests/Invoke-InstallerTests.ps1
+          openspec schema validate dotnet-sdd --verbose
+          openspec validate --all --strict
 
-      - name: Upload guard evidence
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: dotnet-sdd-guard-evidence
-          path: PoCFinal/artifacts/sdd-guard/
-          if-no-files-found: warn
+      - name: Test reusable guard fixtures
+        shell: pwsh
+        run: ./tools/dotnet-sdd-guard/tests/Invoke-GuardTests.ps1
+
+      - name: Test installer fixtures
+        shell: pwsh
+        run: ./distribution/openspec/dotnet-sdd/tests/Invoke-InstallerTests.ps1
+
+      - name: Audit secrets and local paths
+        shell: pwsh
+        run: |
+          $pattern = @(
+            ('[A-Za-z]:' + '\\Users\\'),
+            ('[A-Za-z]:' + '/Users/'),
+            ('file' + '://'),
+            ('local' + 'host'),
+            ('127' + '\.0\.0\.1'),
+            ('\[' + '::1\]'),
+            'ghp_[A-Za-z0-9]{20,}',
+            'github_pat_[A-Za-z0-9_]{20,}'
+          ) -join '|'
+          & git grep -n -i -E $pattern -- ':!legacy/spec-kit/**'
+          if ($LASTEXITCODE -eq 0) { throw 'Secret or local-environment audit found a match.' }
+          if ($LASTEXITCODE -gt 1) { throw "Audit command failed with exit code $LASTEXITCODE." }
+
+      - name: Audit residual application and legacy-runtime references
+        shell: pwsh
+        run: |
+          $pattern = @(
+            ('PoC' + 'Final'),
+            ('Contact' + 'Requests'),
+            ('contact' + '-requests'),
+            ('registrar' + '-contacto'),
+            ('solicitud' + ' de contacto'),
+            ('HU' + '-001'),
+            ('spec' + 'ify-cli'),
+            ('\.' + 'spec' + 'ify'),
+            ('spec' + 'kit\.')
+          ) -join '|'
+          & git grep -n -i -E $pattern -- ':!legacy/spec-kit/**'
+          if ($LASTEXITCODE -eq 0) { throw 'Residual-reference audit found a match.' }
+          if ($LASTEXITCODE -gt 1) { throw "Audit command failed with exit code $LASTEXITCODE." }
+
+      - name: Validate reusable package
+        shell: pwsh
+        run: ./scripts/Test-OpenSpecDotNetSddPackage.ps1

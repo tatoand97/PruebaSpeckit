@@ -1,6 +1,6 @@
 # dotnet-sdd for OpenSpec
 
-This package installs the repository-local `dotnet-sdd` schema, generic `openspec/config.yaml`, canonical governance, neutral deterministic guard, and custom verification skills. It does not install or depend on Python, `uv`, or any previous SDD runtime.
+This package installs the reusable `dotnet-sdd` schema, generic `openspec/config.yaml`, canonical governance, deterministic consumer guard, and custom verification skills. It also asks OpenSpec to generate the official integrations selected with `-Tools`. It does not install or depend on Python, `uv`, or any previous SDD runtime.
 
 Prerequisites:
 
@@ -26,4 +26,4 @@ openspec validate --all --strict
 
 Codex commands are `$openspec-propose`, `$openspec-explore`, `$openspec-update-change`, `$openspec-apply-change`, `$openspec-sync-specs`, and `$openspec-archive-change`. GitHub Copilot commands are `/opsx-propose`, `/opsx-explore`, `/opsx-update`, `/opsx-apply`, `/opsx-sync`, and `/opsx-archive`.
 
-Invoke `./scripts/Invoke-OpenSpecSddGuard.ps1` explicitly before completion. Historical contracts under `docs/sdd-history/` or `legacy/` are never used as active gate evidence.
+Invoke `./scripts/Invoke-OpenSpecSddGuard.ps1` explicitly before completion. The wrapper validates the consumer OpenSpec project, audits local markers and secrets, and invokes the reusable engine against the consumer root. Contracts under `legacy/` are never used as active gate evidence.

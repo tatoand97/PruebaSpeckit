@@ -4,6 +4,12 @@ param(
     [string]$RepositoryRoot = (Split-Path -Parent $PSScriptRoot),
 
     [Parameter()]
+    [string]$ContractRoot,
+
+    [Parameter()]
+    [string]$EvidencePath,
+
+    [Parameter()]
     [switch]$VerboseDiagnostics
 )
 
@@ -11,14 +17,10 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $resolvedRepository = [IO.Path]::GetFullPath($RepositoryRoot)
-$projectRoot = Join-Path $resolvedRepository 'PoCFinal'
 $engine = Join-Path $resolvedRepository 'tools/dotnet-sdd-guard/Invoke-DotNetSddGuard.ps1'
 
 if (-not (Test-Path -LiteralPath (Join-Path $resolvedRepository 'openspec/config.yaml') -PathType Leaf)) {
     throw "OpenSpec root not found at $resolvedRepository"
-}
-if (-not (Test-Path -LiteralPath $projectRoot -PathType Container)) {
-    throw "Application root not found at $projectRoot"
 }
 if (-not (Test-Path -LiteralPath $engine -PathType Leaf)) {
     throw "Guard engine not found at $engine"
@@ -69,5 +71,13 @@ if ($forbiddenCount -gt 0) {
 Write-Output "PASS scanned $($scanFiles.Count) text file(s)."
 
 Write-Output '== Deterministic .NET SDD guard =='
-& $engine -ProjectRoot $projectRoot -ContractRoot $resolvedRepository -VerboseDiagnostics:$VerboseDiagnostics
+$guardArguments = @{
+    ProjectRoot = $resolvedRepository
+    ContractRoot = if ([string]::IsNullOrWhiteSpace($ContractRoot)) { $resolvedRepository } else { [IO.Path]::GetFullPath($ContractRoot) }
+    VerboseDiagnostics = $VerboseDiagnostics
+}
+if (-not [string]::IsNullOrWhiteSpace($EvidencePath)) {
+    $guardArguments.EvidencePath = [IO.Path]::GetFullPath($EvidencePath)
+}
+& $engine @guardArguments
 exit $LASTEXITCODE

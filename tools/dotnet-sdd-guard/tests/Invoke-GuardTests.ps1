@@ -3,7 +3,6 @@ param()
 
 $ErrorActionPreference = 'Stop'
 $guard = (Resolve-Path (Join-Path $PSScriptRoot '../Invoke-DotNetSddGuard.ps1')).Path
-$repositoryGuard = (Resolve-Path (Join-Path $PSScriptRoot '../../../scripts/Invoke-OpenSpecSddGuard.ps1')).Path
 $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("dotnet-sdd-guard-tests-" + [guid]::NewGuid().ToString('N'))
 $script:Passed = 0
 $script:Failed = 0
@@ -15,30 +14,6 @@ function Write-Utf8 {
         New-Item -ItemType Directory -Path $parent -Force | Out-Null
     }
     Set-Content -LiteralPath $Path -Value $Content -Encoding utf8NoBOM
-}
-
-function New-EvidenceFile {
-    param([string]$Root)
-
-    $evidence = [ordered]@{
-        restore = $true
-        build = $true
-        tests = [ordered]@{
-            ok = $true
-            counts = [ordered]@{
-                executed = 11
-                passed = 11
-                failed = 0
-                skipped = 0
-            }
-        }
-        coverage = 85
-        openapi = $true
-    }
-
-    $path = Join-Path $Root 'evidence.json'
-    $evidence | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $path -Encoding utf8NoBOM
-    return $path
 }
 
 function New-Fixture {
@@ -77,19 +52,21 @@ function New-Fixture {
         Write-Utf8 (Join-Path $root 'openspec/specs/sales/contracts/openapi.yaml') "openapi: 3.1.0`ninfo:`n  title: Fixture`n  version: 1.0.0`npaths: {}"
     }
 
-    [void](New-EvidenceFile $root)
     return $root
 }
 
 function Invoke-Guard {
     param(
         [string]$Root,
-        [switch]$UseEvidence,
+        [switch]$UseMocks,
         [hashtable]$Environment
     )
 
     $backup = @{}
     try {
+        if ($UseMocks -and -not $Environment) {
+            $Environment = Install-ExternalMocks -Root $Root
+        }
         if ($Environment) {
             foreach ($key in $Environment.Keys) {
                 $backup[$key] = [Environment]::GetEnvironmentVariable($key, 'Process')
@@ -97,11 +74,7 @@ function Invoke-Guard {
             }
         }
 
-        if ($UseEvidence) {
-            & $guard -ProjectRoot $Root -EvidencePath (Join-Path $Root 'evidence.json') *> $null
-        } else {
-            & $guard -ProjectRoot $Root *> $null
-        }
+        & $guard -ProjectRoot $Root *> $null
         return $LASTEXITCODE
     }
     finally {
@@ -128,7 +101,7 @@ function Assert-Case {
     param(
         [string]$Name,
         [scriptblock]$Arrange,
-        [switch]$UseEvidence,
+        [switch]$UseMocks,
         [int]$ExpectedExit,
         [string]$CheckId,
         [string[]]$ExpectedStatuses,
@@ -138,7 +111,7 @@ function Assert-Case {
     try {
         $root = New-Fixture $Name
         $invokeEnvironment = & $Arrange $root
-        $exitCode = Invoke-Guard -Root $root -UseEvidence:$UseEvidence -Environment $invokeEnvironment
+        $exitCode = Invoke-Guard -Root $root -UseMocks:$UseMocks -Environment $invokeEnvironment
         $report = Get-GuardReport $root
         $check = Get-Check $report $CheckId
 
@@ -170,7 +143,9 @@ function Install-DotnetMock {
         [string]$Root,
         [int]$RestoreExit = 0,
         [int]$BuildExit = 0,
-        [int]$TestExit = 0
+        [int]$TestExit = 0,
+        [ValidateRange(0, 10)]
+        [int]$CoveredLines = 10
     )
 
     $mockRoot = Join-Path $Root 'tools/mockbin'
@@ -221,6 +196,10 @@ if ($command -eq 'test') {
   </ResultSummary>
 </TestRun>
 "@
+        $coverageLines = for ($lineNumber = 1; $lineNumber -le 10; $lineNumber++) {
+            $hits = if ($lineNumber -le [int]$env:MOCK_DOTNET_COVERED_LINES) { 1 } else { 0 }
+            "            <line number=`"$lineNumber`" hits=`"$hits`" />"
+        }
         $coverage = @"
 <?xml version="1.0" encoding="utf-8"?>
 <coverage>
@@ -229,7 +208,7 @@ if ($command -eq 'test') {
       <classes>
         <class>
           <lines>
-            <line number="1" hits="1" />
+$($coverageLines -join "`n")
           </lines>
         </class>
       </classes>
@@ -263,6 +242,7 @@ exit /b %ERRORLEVEL%
         MOCK_DOTNET_RESTORE_EXIT = [string]$RestoreExit
         MOCK_DOTNET_BUILD_EXIT = [string]$BuildExit
         MOCK_DOTNET_TEST_EXIT = [string]$TestExit
+        MOCK_DOTNET_COVERED_LINES = [string]$CoveredLines
     }
 
     return $envConfig
@@ -273,10 +253,12 @@ function Install-ExternalMocks {
         [string]$Root,
         [int]$RestoreExit = 0,
         [int]$BuildExit = 0,
-        [int]$TestExit = 0
+        [int]$TestExit = 0,
+        [ValidateRange(0, 10)]
+        [int]$CoveredLines = 10
     )
 
-    $envConfig = Install-DotnetMock -Root $Root -RestoreExit $RestoreExit -BuildExit $BuildExit -TestExit $TestExit
+    $envConfig = Install-DotnetMock -Root $Root -RestoreExit $RestoreExit -BuildExit $BuildExit -TestExit $TestExit -CoveredLines $CoveredLines
     $mockRoot = Join-Path $Root 'tools/mockbin'
     $npxScript = @'
 $contractPath = if ($args.Count -gt 0) { $args[$args.Count - 1] } else { '' }
@@ -291,130 +273,122 @@ exit 0
     return $envConfig
 }
 
-function Invoke-RepositoryScanFixture {
-    param(
-        [string]$Name,
-        [string]$Content
-    )
-
-    $root = Join-Path $tempRoot $Name
-    Write-Utf8 (Join-Path $root 'openspec/config.yaml') 'schema: dotnet-sdd'
-    New-Item -ItemType Directory -Path (Join-Path $root 'PoCFinal') -Force | Out-Null
-    Write-Utf8 (Join-Path $root 'tools/dotnet-sdd-guard/Invoke-DotNetSddGuard.ps1') 'param([string]$ProjectRoot, [string]$ContractRoot, [switch]$VerboseDiagnostics) exit 0'
-    Write-Utf8 (Join-Path $root 'src/scan-fixture.md') $Content
-
-    $mockRoot = Join-Path $root 'tools/mockbin'
-    Write-Utf8 (Join-Path $mockRoot 'openspec.cmd') "@echo off`r`nexit /b 0"
-    $originalPath = [Environment]::GetEnvironmentVariable('PATH', 'Process')
-    try {
-        [Environment]::SetEnvironmentVariable('PATH', "$mockRoot;$originalPath", 'Process')
-        & (Get-Process -Id $PID).Path -NoProfile -File $repositoryGuard -RepositoryRoot $root *> $null
-        return $LASTEXITCODE
-    }
-    finally {
-        [Environment]::SetEnvironmentVariable('PATH', $originalPath, 'Process')
-    }
-}
-
 try {
     New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+
+    Assert-Case 'valid-modular-consumer-passes' {
+        param($r)
+    } -UseMocks -ExpectedExit 0 -CheckId 'ARCH001' -ExpectedStatuses @('PASS')
 
     Assert-Case 'openapi-historical-only-fails-http' {
         param($r)
         Remove-Item -LiteralPath (Join-Path $r 'openspec/specs/sales/contracts/openapi.yaml') -Force
         Write-Utf8 (Join-Path $r 'docs/sdd-history/spec-kit/001/contracts/openapi.yaml') "openapi: 3.1.0`ninfo:`n  title: Historical`n  version: 1.0.0`npaths: {}"
-    } -UseEvidence -ExpectedExit 1 -CheckId 'OPENAPI001' -ExpectedStatuses @('FAIL')
+    } -UseMocks -ExpectedExit 1 -CheckId 'OPENAPI001' -ExpectedStatuses @('FAIL')
 
     Assert-Case 'openapi-active-valid-passes' {
         param($r)
-    } -UseEvidence -ExpectedExit 0 -CheckId 'OPENAPI001' -ExpectedStatuses @('PASS')
+    } -UseMocks -ExpectedExit 0 -CheckId 'OPENAPI001' -ExpectedStatuses @('PASS')
 
     Assert-Case 'openapi-active-invalid-fails' {
         param($r)
         Write-Utf8 (Join-Path $r 'openspec/specs/sales/contracts/openapi.yaml') 'INVALID_OPENAPI_FIXTURE'
         return (Install-ExternalMocks -Root $r)
-    } -UseEvidence:$false -ExpectedExit 1 -CheckId 'OPENAPI001' -ExpectedStatuses @('FAIL')
+    } -UseMocks:$false -ExpectedExit 1 -CheckId 'OPENAPI001' -ExpectedStatuses @('FAIL')
 
     Assert-Case 'openapi-invalid-history-is-ignored' {
         param($r)
         Write-Utf8 (Join-Path $r 'docs/sdd-history/spec-kit/001/contracts/openapi.yaml') 'INVALID_OPENAPI_FIXTURE'
-    } -UseEvidence -ExpectedExit 0 -CheckId 'OPENAPI001' -ExpectedStatuses @('PASS')
+    } -UseMocks -ExpectedExit 0 -CheckId 'OPENAPI001' -ExpectedStatuses @('PASS')
 
     Assert-Case 'openapi-non-http-without-contract-is-not-applicable' {
         param($r)
         Remove-Item -LiteralPath (Join-Path $r 'openspec/specs/sales/contracts/openapi.yaml') -Force
         Remove-Item -LiteralPath (Join-Path $r 'src/Modules/Sales/Sales.Presentation/Endpoints.cs') -Force
         Write-Utf8 (Join-Path $r 'src/App.Server/App.Server.csproj') '<Project Sdk="Microsoft.NET.Sdk"><ItemGroup><ProjectReference Include="../Modules/Sales/Sales.Presentation/Sales.Presentation.csproj" /></ItemGroup></Project>'
-    } -UseEvidence -ExpectedExit 0 -CheckId 'OPENAPI001' -ExpectedStatuses @('NOT_APPLICABLE')
+    } -UseMocks -ExpectedExit 0 -CheckId 'OPENAPI001' -ExpectedStatuses @('NOT_APPLICABLE')
 
-    try {
-        $localMarkers = @(
-            ('C:' + '\Users\scan-user\'),
-            ('C:' + '/Users/scan-user/'),
-            ('file' + '://'),
-            ('local' + 'host'),
-            ('127' + '.0.0.1'),
-            ('[' + '::1]')
-        ) -join "`n"
-        $scanExit = Invoke-RepositoryScanFixture -Name 'local-scan-detects-all-markers' -Content $localMarkers
-        if ($scanExit -ne 1) { throw "Expected scanner exit 1 but got $scanExit." }
-        $script:Passed++
-        Write-Output 'PASS local-scan-detects-all-markers'
-    } catch {
-        $script:Failed++
-        Write-Output "FAIL local-scan-detects-all-markers - $($_.Exception.Message)"
-    }
-
-    try {
-        $regexDocumentation = 'Regex documentation may describe a drive prefix, a Users segment, or loopback tokens as separate fragments.'
-        $scanExit = Invoke-RepositoryScanFixture -Name 'local-scan-ignores-regex-documentation' -Content $regexDocumentation
-        if ($scanExit -ne 0) { throw "Expected scanner exit 0 but got $scanExit." }
-        $script:Passed++
-        Write-Output 'PASS local-scan-ignores-regex-documentation'
-    } catch {
-        $script:Failed++
-        Write-Output "FAIL local-scan-ignores-regex-documentation - $($_.Exception.Message)"
-    }
-
-    Assert-Case 'arch-presentation-to-application-pass' { param($r) } -UseEvidence -ExpectedExit 0 -CheckId 'ARCH001' -ExpectedStatuses @('PASS')
+    Assert-Case 'arch-presentation-to-application-pass' { param($r) } -UseMocks -ExpectedExit 0 -CheckId 'ARCH001' -ExpectedStatuses @('PASS')
 
     Assert-Case 'arch-presentation-to-same-module-infrastructure-pass' {
         param($r)
         Write-Utf8 (Join-Path $r 'src/Modules/Sales/Sales.Presentation/Sales.Presentation.csproj') '<Project Sdk="Microsoft.NET.Sdk"><ItemGroup><ProjectReference Include="../Sales.Infrastructure/Sales.Infrastructure.csproj" /></ItemGroup></Project>'
-    } -UseEvidence -ExpectedExit 0 -CheckId 'ARCH001' -ExpectedStatuses @('PASS')
+    } -UseMocks -ExpectedExit 0 -CheckId 'ARCH001' -ExpectedStatuses @('PASS')
 
-    Assert-Case 'arch-infrastructure-to-application-pass' { param($r) } -UseEvidence -ExpectedExit 0 -CheckId 'ARCH001' -ExpectedStatuses @('PASS')
+    Assert-Case 'arch-infrastructure-to-application-pass' { param($r) } -UseMocks -ExpectedExit 0 -CheckId 'ARCH001' -ExpectedStatuses @('PASS')
 
     Assert-Case 'arch-application-to-infrastructure-fail' {
         param($r)
         Write-Utf8 (Join-Path $r 'src/Modules/Sales/Sales.Application/Sales.Application.csproj') '<Project Sdk="Microsoft.NET.Sdk"><ItemGroup><ProjectReference Include="../Sales.Domain/Sales.Domain.csproj" /><ProjectReference Include="../Sales.Infrastructure/Sales.Infrastructure.csproj" /></ItemGroup></Project>'
-    } -UseEvidence -ExpectedExit 1 -CheckId 'ARCH001' -ExpectedStatuses @('FAIL')
+    } -UseMocks -ExpectedExit 1 -CheckId 'ARCH001' -ExpectedStatuses @('FAIL')
 
     Assert-Case 'arch-cross-module-presentation-to-application-fail' {
         param($r)
         Write-Utf8 (Join-Path $r 'src/Modules/Billing/Billing.Application/Billing.Application.csproj') '<Project Sdk="Microsoft.NET.Sdk" />'
         Write-Utf8 (Join-Path $r 'src/Modules/Sales/Sales.Presentation/Sales.Presentation.csproj') '<Project Sdk="Microsoft.NET.Sdk"><ItemGroup><ProjectReference Include="../../Billing/Billing.Application/Billing.Application.csproj" /></ItemGroup></Project>'
-    } -UseEvidence -ExpectedExit 1 -CheckId 'ARCH001' -ExpectedStatuses @('FAIL')
+    } -UseMocks -ExpectedExit 1 -CheckId 'ARCH001' -ExpectedStatuses @('FAIL')
 
     Assert-Case 'arch-common-to-module-fail' {
         param($r)
         Write-Utf8 (Join-Path $r 'src/Common/Common.Presentation/Common.Presentation.csproj') '<Project Sdk="Microsoft.NET.Sdk"><ItemGroup><ProjectReference Include="../../Modules/Sales/Sales.Presentation/Sales.Presentation.csproj" /></ItemGroup></Project>'
-    } -UseEvidence -ExpectedExit 1 -CheckId 'ARCH001' -ExpectedStatuses @('FAIL')
+    } -UseMocks -ExpectedExit 1 -CheckId 'ARCH001' -ExpectedStatuses @('FAIL')
+
+    Assert-Case 'persistence-outside-infrastructure-fails' {
+        param($r)
+        Write-Utf8 (Join-Path $r 'src/Modules/Sales/Sales.Application/LeakedStore.cs') 'public sealed class LeakedStore : DbContext {}'
+    } -UseMocks -ExpectedExit 1 -CheckId 'PERSIST001' -ExpectedStatuses @('FAIL')
 
     Assert-Case 'mig-docs-text-ignored' {
         param($r)
         Write-Utf8 (Join-Path $r 'docs/notes.md') 'dotnet ef migrations add Initial and EnsureCreated();'
-    } -UseEvidence -ExpectedExit 0 -CheckId 'MIG001' -ExpectedStatuses @('PASS')
+    } -UseMocks -ExpectedExit 0 -CheckId 'MIG001' -ExpectedStatuses @('PASS')
 
     Assert-Case 'mig-openspec-text-ignored' {
         param($r)
         Write-Utf8 (Join-Path $r 'openspec/schemas/example/template.md') 'Microsoft.EntityFrameworkCore.Design and dotnet ef database update'
-    } -UseEvidence -ExpectedExit 0 -CheckId 'MIG001' -ExpectedStatuses @('PASS')
+    } -UseMocks -ExpectedExit 0 -CheckId 'MIG001' -ExpectedStatuses @('PASS')
 
     Assert-Case 'mig-ensurecreated-detected' {
         param($r)
         Write-Utf8 (Join-Path $r 'src/Modules/Sales/Sales.Infrastructure/Init.cs') 'db.Database.EnsureCreated();'
-    } -UseEvidence -ExpectedExit 1 -CheckId 'MIG001' -ExpectedStatuses @('FAIL')
+    } -UseMocks -ExpectedExit 1 -CheckId 'MIG001' -ExpectedStatuses @('FAIL')
+
+    Assert-Case 'http-without-wolverine-fails' {
+        param($r)
+        Write-Utf8 (Join-Path $r 'src/Modules/Sales/Sales.Application/Sales.Application.csproj') '<Project Sdk="Microsoft.NET.Sdk"><ItemGroup><ProjectReference Include="../Sales.Domain/Sales.Domain.csproj" /></ItemGroup></Project>'
+    } -UseMocks -ExpectedExit 1 -CheckId 'WOLV001' -ExpectedStatuses @('FAIL')
+
+    Assert-Case 'wolverine-without-mediator-only-fails' {
+        param($r)
+        Write-Utf8 (Join-Path $r 'src/App.Server/Program.cs') 'builder.Configuration.AddAzureAppConfiguration(o => o.Connect(new Uri(config["AppConfigEndpoint"]), new DefaultAzureCredential())); services.AddProblemDetails(); class GlobalFallbackExceptionHandler : IExceptionHandler { public bool TryHandleAsync(HttpContext context, Exception ex, CancellationToken token) { return true; } }'
+    } -UseMocks -ExpectedExit 1 -CheckId 'WOLV002' -ExpectedStatuses @('FAIL')
+
+    Assert-Case 'http-without-problem-details-fails' {
+        param($r)
+        Write-Utf8 (Join-Path $r 'src/Modules/Sales/Sales.Presentation/Endpoints.cs') 'app.MapGet("/orders", () => 1);'
+        Write-Utf8 (Join-Path $r 'src/App.Server/Program.cs') 'opts.DurabilityMode = DurabilityMode.MediatorOnly; builder.Configuration.AddAzureAppConfiguration(o => o.Connect(new Uri(config["AppConfigEndpoint"]), new DefaultAzureCredential()));'
+    } -UseMocks -ExpectedExit 1 -CheckId 'HTTP001' -ExpectedStatuses @('FAIL')
+
+    Assert-Case 'http-without-azure-app-configuration-fails' {
+        param($r)
+        Write-Utf8 (Join-Path $r 'src/Modules/Sales/Sales.Infrastructure/Sales.Infrastructure.csproj') '<Project Sdk="Microsoft.NET.Sdk"><ItemGroup><ProjectReference Include="../Sales.Application/Sales.Application.csproj" /></ItemGroup></Project>'
+        Write-Utf8 (Join-Path $r 'src/App.Server/Program.cs') 'opts.DurabilityMode = DurabilityMode.MediatorOnly; services.AddProblemDetails(); class GlobalFallbackExceptionHandler : IExceptionHandler { public bool TryHandleAsync(HttpContext context, Exception ex, CancellationToken token) { return true; } }'
+    } -UseMocks -ExpectedExit 1 -CheckId 'AZURE001' -ExpectedStatuses @('FAIL')
+
+    Assert-Case 'release-build-warning-fails' {
+        param($r)
+        return (Install-ExternalMocks -Root $r -RestoreExit 0 -BuildExit 1 -TestExit 0)
+    } -UseMocks:$false -ExpectedExit 1 -CheckId 'BUILD001' -ExpectedStatuses @('FAIL')
+
+    Assert-Case 'unit-test-failure-fails' {
+        param($r)
+        return (Install-ExternalMocks -Root $r -RestoreExit 0 -BuildExit 0 -TestExit 1)
+    } -UseMocks:$false -ExpectedExit 1 -CheckId 'TEST001' -ExpectedStatuses @('FAIL')
+
+    Assert-Case 'coverage-below-eighty-fails' {
+        param($r)
+        return (Install-ExternalMocks -Root $r -CoveredLines 7)
+    } -UseMocks:$false -ExpectedExit 1 -CheckId 'COV001' -ExpectedStatuses @('FAIL')
 
     Assert-Case 'test001-ignores-historical-trx' {
         param($r)
@@ -422,7 +396,7 @@ try {
         New-Item -ItemType Directory -Path $old -Force | Out-Null
         Write-Utf8 (Join-Path $old 'historical.trx') '<?xml version="1.0" encoding="utf-8"?><TestRun><ResultSummary><Counters executed="11" passed="11" failed="0" notExecuted="0" /></ResultSummary></TestRun>'
         return (Install-ExternalMocks -Root $r -RestoreExit 0 -BuildExit 0 -TestExit 0)
-    } -UseEvidence:$false -ExpectedExit 0 -CheckId 'TEST001' -ExpectedStatuses @('PASS') -ExtraAssert {
+    } -UseMocks:$false -ExpectedExit 0 -CheckId 'TEST001' -ExpectedStatuses @('PASS') -ExtraAssert {
         param($r, $report, $check)
         if ($check.evidence -notmatch 'executed=11; passed=11; failed=0; skipped=0') {
             throw "TEST001 evidence did not isolate current run: $($check.evidence)"
@@ -432,7 +406,7 @@ try {
     Assert-Case 'test001-new-run-ignores-previous-raw' {
         param($r)
         return (Install-ExternalMocks -Root $r -RestoreExit 0 -BuildExit 0 -TestExit 0)
-    } -UseEvidence:$false -ExpectedExit 0 -CheckId 'TEST001' -ExpectedStatuses @('PASS') -ExtraAssert {
+    } -UseMocks:$false -ExpectedExit 0 -CheckId 'TEST001' -ExpectedStatuses @('PASS') -ExtraAssert {
         param($r, $report, $check)
         if ($check.evidence -notmatch 'executed=11; passed=11; failed=0; skipped=0') {
             throw "First run evidence unexpected: $($check.evidence)"
@@ -473,7 +447,7 @@ opts.DurabilityMode = DurabilityMode.MediatorOnly;
 builder.Configuration.AddAzureAppConfiguration(o => o.Connect(new Uri(config["AppConfigEndpoint"]), new DefaultAzureCredential()));
 services.AddProblemDetails();
 '@
-    } -UseEvidence -ExpectedExit 0 -CheckId 'EXC001' -ExpectedStatuses @('PASS') -ExtraAssert {
+    } -UseMocks -ExpectedExit 0 -CheckId 'EXC001' -ExpectedStatuses @('PASS') -ExtraAssert {
         param($r, $report, $check)
         if ($check.severity -ne 'HARD') {
             throw "EXC001 PASS must be HARD but got $($check.severity)."
@@ -505,7 +479,7 @@ opts.DurabilityMode = DurabilityMode.MediatorOnly;
 builder.Configuration.AddAzureAppConfiguration(o => o.Connect(new Uri(config["AppConfigEndpoint"]), new DefaultAzureCredential()));
 services.AddProblemDetails();
 '@
-    } -UseEvidence -ExpectedExit 1 -CheckId 'EXC001' -ExpectedStatuses @('FAIL') -ExtraAssert {
+    } -UseMocks -ExpectedExit 1 -CheckId 'EXC001' -ExpectedStatuses @('FAIL') -ExtraAssert {
         param($r, $report, $check)
         if ($check.severity -ne 'HARD') {
             throw "EXC001 FAIL must be HARD but got $($check.severity)."
@@ -536,7 +510,7 @@ opts.DurabilityMode = DurabilityMode.MediatorOnly;
 builder.Configuration.AddAzureAppConfiguration(o => o.Connect(new Uri(config["AppConfigEndpoint"]), new DefaultAzureCredential()));
 services.AddProblemDetails();
 '@
-    } -UseEvidence -ExpectedExit 1 -CheckId 'EXC001' -ExpectedStatuses @('FAIL') -ExtraAssert {
+    } -UseMocks -ExpectedExit 1 -CheckId 'EXC001' -ExpectedStatuses @('FAIL') -ExtraAssert {
         param($r, $report, $check)
         if ($check.severity -ne 'HARD') {
             throw "EXC001 FAIL must be HARD but got $($check.severity)."
@@ -576,7 +550,7 @@ opts.DurabilityMode = DurabilityMode.MediatorOnly;
 builder.Configuration.AddAzureAppConfiguration(o => o.Connect(new Uri(config["AppConfigEndpoint"]), new DefaultAzureCredential()));
 services.AddProblemDetails();
 '@
-    } -UseEvidence -ExpectedExit 0 -CheckId 'EXC001' -ExpectedStatuses @('ADVISORY') -ExtraAssert {
+    } -UseMocks -ExpectedExit 0 -CheckId 'EXC001' -ExpectedStatuses @('ADVISORY') -ExtraAssert {
         param($r, $report, $check)
         if ($check.severity -ne 'ADVISORY') {
             throw "EXC001 ADVISORY must keep ADVISORY severity but got $($check.severity)."
@@ -587,14 +561,14 @@ services.AddProblemDetails();
         param($r)
         Remove-Item -LiteralPath (Join-Path $r 'src/Modules/Sales/Sales.Application/IOrderRepository.cs') -Force
         Write-Utf8 (Join-Path $r 'docs/repository-guidance.md') 'Create IOrderRepository for abstraction.'
-    } -UseEvidence -ExpectedExit 0 -CheckId 'PERSIST002' -ExpectedStatuses @('ADVISORY')
+    } -UseMocks -ExpectedExit 0 -CheckId 'PERSIST002' -ExpectedStatuses @('ADVISORY')
 
     Assert-Case 'wolv-doc-marker-does-not-pass' {
         param($r)
         Write-Utf8 (Join-Path $r 'src/Modules/Sales/Sales.Application/Sales.Application.csproj') '<Project Sdk="Microsoft.NET.Sdk"><ItemGroup><ProjectReference Include="../Sales.Domain/Sales.Domain.csproj" /></ItemGroup></Project>'
         Write-Utf8 (Join-Path $r 'src/App.Server/Program.cs') 'builder.Configuration.AddAzureAppConfiguration(o => o.Connect(new Uri(config["AppConfigEndpoint"]), new DefaultAzureCredential())); services.AddProblemDetails(); class GlobalFallbackExceptionHandler : IExceptionHandler { public bool TryHandleAsync(HttpContext context, Exception ex, CancellationToken token) { return true; } }'
         Write-Utf8 (Join-Path $r 'docs/wolverine-notes.md') 'WolverineFx DurabilityMode.MediatorOnly WolverineFx.RabbitMQ'
-    } -UseEvidence -ExpectedExit 1 -CheckId 'WOLV001' -ExpectedStatuses @('FAIL') -ExtraAssert {
+    } -UseMocks -ExpectedExit 1 -CheckId 'WOLV001' -ExpectedStatuses @('FAIL') -ExtraAssert {
         param($r, $report, $check)
         $check2 = Get-Check $report 'WOLV002'
         if (-not $check2 -or $check2.status -ne 'FAIL') {
@@ -607,19 +581,19 @@ services.AddProblemDetails();
         Write-Utf8 (Join-Path $r 'src/Modules/Sales/Sales.Infrastructure/Sales.Infrastructure.csproj') '<Project Sdk="Microsoft.NET.Sdk"><ItemGroup><ProjectReference Include="../Sales.Application/Sales.Application.csproj" /></ItemGroup></Project>'
         Write-Utf8 (Join-Path $r 'src/App.Server/Program.cs') 'opts.DurabilityMode = DurabilityMode.MediatorOnly; services.AddProblemDetails(); class GlobalFallbackExceptionHandler : IExceptionHandler { public bool TryHandleAsync(HttpContext context, Exception ex, CancellationToken token) { return true; } }'
         Write-Utf8 (Join-Path $r 'specs/001/research.md') 'Microsoft.Azure.AppConfiguration.AspNetCore Azure.Identity AddAzureAppConfiguration(DefaultAzureCredential())'
-    } -UseEvidence -ExpectedExit 1 -CheckId 'AZURE001' -ExpectedStatuses @('FAIL')
+    } -UseMocks -ExpectedExit 1 -CheckId 'AZURE001' -ExpectedStatuses @('FAIL')
 
     Assert-Case 'http-doc-marker-does-not-pass' {
         param($r)
         Write-Utf8 (Join-Path $r 'src/Modules/Sales/Sales.Presentation/Endpoints.cs') 'app.MapGet("/orders", () => 1);'
         Write-Utf8 (Join-Path $r 'src/App.Server/Program.cs') 'opts.DurabilityMode = DurabilityMode.MediatorOnly; builder.Configuration.AddAzureAppConfiguration(o => o.Connect(new Uri(config["AppConfigEndpoint"]), new DefaultAzureCredential()));'
         Write-Utf8 (Join-Path $r 'openspec/schemas/example/http-template.md') 'Use AddProblemDetails() and implement IExceptionHandler.'
-    } -UseEvidence -ExpectedExit 1 -CheckId 'HTTP001' -ExpectedStatuses @('FAIL')
+    } -UseMocks -ExpectedExit 1 -CheckId 'HTTP001' -ExpectedStatuses @('FAIL')
 
     Assert-Case 'invoke-external-preserves-exit-and-coverage-args' {
         param($r)
         return (Install-ExternalMocks -Root $r -RestoreExit 0 -BuildExit 0 -TestExit 7)
-    } -UseEvidence:$false -ExpectedExit 1 -CheckId 'TEST001' -ExpectedStatuses @('FAIL') -ExtraAssert {
+    } -UseMocks:$false -ExpectedExit 1 -CheckId 'TEST001' -ExpectedStatuses @('FAIL') -ExtraAssert {
         param($r, $report, $check)
         $log = Get-Content -LiteralPath (Join-Path $r 'dotnet-invocations.log') -Raw
         if ($log -notmatch '--collect:XPlat Code Coverage') {
@@ -634,7 +608,7 @@ services.AddProblemDetails();
     }
 
     $schemaRoot = New-Fixture 'report-schema'
-    [void](Invoke-Guard -Root $schemaRoot -UseEvidence)
+    [void](Invoke-Guard -Root $schemaRoot -UseMocks)
     $schemaReport = Get-GuardReport $schemaRoot
     if ($schemaReport.schemaVersion -eq '1.0' -and $schemaReport.guard.id -eq 'dotnet-sdd-guard' -and $schemaReport.guard.version -eq '2.0.0' -and $schemaReport.summary -and $schemaReport.checks.Count -gt 0) {
         $script:Passed++
@@ -644,17 +618,19 @@ services.AddProblemDetails();
         Write-Output 'FAIL report-json-schema'
     }
 
-    $secretRoot = New-Fixture 'sanitization'
-    Write-Utf8 (Join-Path $secretRoot 'src/secret.cs') 'var token = "super-secret-value"; var path = "LOCAL_ABSOLUTE_PATH_FIXTURE";'
-    [void](Invoke-Guard -Root $secretRoot -UseEvidence)
+    $secretRoot = New-Fixture 'secret-and-local-evidence-sanitization'
+    $secretValue = 'super-' + 'secret-value'
+    $localValue = 'C:' + '\Users\fixture-user\private'
+    Write-Utf8 (Join-Path $secretRoot 'src/secret.cs') "var token = `"$secretValue`"; var path = `"$localValue`";"
+    [void](Invoke-Guard -Root $secretRoot -UseMocks)
     $exports = (Get-Content -LiteralPath (Join-Path $secretRoot 'artifacts/sdd-guard/guard-result.json') -Raw) +
         (Get-Content -LiteralPath (Join-Path $secretRoot 'artifacts/sdd-guard/guard-result.md') -Raw)
-    if ($exports -notmatch 'super-secret-value|LOCAL_ABSOLUTE_PATH_FIXTURE') {
+    if ($exports -notmatch [regex]::Escape($secretValue) -and $exports -notmatch [regex]::Escape($localValue)) {
         $script:Passed++
-        Write-Output 'PASS sanitization'
+        Write-Output 'PASS secret-and-local-evidence-sanitization'
     } else {
         $script:Failed++
-        Write-Output 'FAIL sanitization'
+        Write-Output 'FAIL secret-and-local-evidence-sanitization'
     }
 
     if ($script:Failed -gt 0) {

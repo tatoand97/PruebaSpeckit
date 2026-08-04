@@ -4,9 +4,9 @@
 
 **UNSUPPORTED**
 
-**NOT USED BY THE CURRENT WORKFLOW**
+**NOT USED BY THE CURRENT OPENSPEC WORKFLOW**
 
-These files preserve the former preset, workflow, extension, harness, generated skills, catalogs, distribution reports, and release artifacts for historical traceability only. Nothing under this directory may be referenced by active OpenSpec configuration, agent instructions, CI, application projects, or verification scripts.
+This directory-level notice applies to every descendant, including archives and formats that cannot carry an inline banner. These files preserve the former preset, workflow, extension, harness, generated skills, catalogs, distribution reports, and release artifacts for historical traceability only. Nothing under this directory may be referenced by active OpenSpec configuration, agent instructions, CI, consumer projects, or verification scripts.
 
 The canonical retained ZIP copies are under `distribution/artifacts/`. Identical copies formerly stored under `dotnet-sdd-bundle/dist/` were removed after SHA-256 comparison:
 

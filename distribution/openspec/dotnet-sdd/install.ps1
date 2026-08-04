@@ -72,14 +72,21 @@ function Add-Payload([string]$Source, [string]$Destination) {
     })
 }
 
-foreach ($file in Get-ChildItem -LiteralPath (Join-Path $packageRoot 'schema') -Recurse -File) {
-    $relative = $file.FullName.Substring((Join-Path $packageRoot 'schema').Length).TrimStart('\', '/')
-    Add-Payload $file.FullName (Join-Path $targetRoot "openspec/schemas/dotnet-sdd/$relative")
+function Add-PayloadTree([string]$SourceRoot, [string]$DestinationRoot) {
+    if (-not (Test-Path -LiteralPath $SourceRoot -PathType Container)) {
+        throw "Package payload directory is missing: $SourceRoot"
+    }
+    foreach ($file in Get-ChildItem -LiteralPath $SourceRoot -Recurse -File) {
+        $relative = $file.FullName.Substring($SourceRoot.Length).TrimStart('\', '/')
+        Add-Payload $file.FullName (Join-Path $DestinationRoot $relative)
+    }
 }
+
+Add-PayloadTree (Join-Path $packageRoot 'schema') (Join-Path $targetRoot 'openspec/schemas/dotnet-sdd')
 Add-Payload (Join-Path $packageRoot 'config/config.yaml') (Join-Path $targetRoot 'openspec/config.yaml')
 Add-Payload (Join-Path $packageRoot 'docs/dotnet-sdd-governance.md') (Join-Path $targetRoot 'docs/architecture/dotnet-sdd-governance.md')
-Add-Payload (Join-Path $packageRoot 'tools/dotnet-sdd-guard/Invoke-DotNetSddGuard.ps1') (Join-Path $targetRoot 'tools/dotnet-sdd-guard/Invoke-DotNetSddGuard.ps1')
-Add-Payload (Join-Path $packageRoot 'scripts/Invoke-OpenSpecSddGuard.ps1') (Join-Path $targetRoot 'scripts/Invoke-OpenSpecSddGuard.ps1')
+Add-PayloadTree (Join-Path $packageRoot 'tools/dotnet-sdd-guard') (Join-Path $targetRoot 'tools/dotnet-sdd-guard')
+Add-PayloadTree (Join-Path $packageRoot 'scripts') (Join-Path $targetRoot 'scripts')
 
 if ('codex' -in $Tools) {
     Add-Payload (Join-Path $packageRoot 'skills/codex/dotnet-sdd-verify/SKILL.md') (Join-Path $targetRoot '.codex/skills/dotnet-sdd-verify/SKILL.md')

@@ -1,14 +1,14 @@
 # Repository agent guidance
 
-## Active SDD system
+## Active product
 
-Use the single root `openspec/` tree and its `dotnet-sdd` schema. The canonical policy is `docs/architecture/dotnet-sdd-governance.md`; summarize or link it rather than duplicating it.
+The only active product is the reusable `dotnet-sdd` framework for OpenSpec. Use the single root `openspec/` tree and its `dotnet-sdd` schema. The canonical policy is `docs/architecture/dotnet-sdd-governance.md`; summarize or link it rather than duplicating it.
 
-The active contact-request contract is `openspec/specs/contact-requests/contracts/openapi.yaml`. Historical contracts under `docs/sdd-history/` or `legacy/` never satisfy current gates. OpenSpec `1.7.0` is the minimum supported CLI version.
+OpenSpec 1.7.0 is the minimum supported CLI version. This repository contains no executable consumer application and no product-specific capability. Active consumer contracts are installed and validated in consumer repositories, never sourced from `legacy/`.
 
-For Codex, invoke OpenSpec through `.codex/skills/openspec-*` (for example `$openspec-propose`, `$openspec-explore`, `$openspec-update-change`, `$openspec-apply-change`, `$openspec-sync-specs`, and `$openspec-archive-change`). Do not use terminal-style `/opsx:*` syntax in Codex. Regenerate managed skills with `openspec update`; never edit them manually.
+For Codex, invoke OpenSpec through `.codex/skills/openspec-*`. Do not use terminal-style `/opsx:*` syntax in Codex. Regenerate managed skills with `openspec update`; never edit them manually.
 
-Use `openspec` terminal commands for state and validation: `openspec list`, `openspec status`, `openspec schemas`, and `openspec validate`. Run `./scripts/Invoke-OpenSpecSddGuard.ps1` before completion.
+Use `openspec` terminal commands for state and validation: `openspec list`, `openspec status`, `openspec schemas`, and `openspec validate`. Run `./scripts/Test-OpenSpecDotNetSddPackage.ps1` before completion.
 
 ## Code discovery
 
@@ -25,7 +25,7 @@ Fall back to text search for literals, error messages, configuration, scripts, n
 ## Boundaries
 
 - Keep behavior in specs and technical choices in research/design.
-- Preserve existing application behavior unless an approved capability delta changes it.
-- Do not create a nested OpenSpec installation under `PoCFinal`.
+- Preserve the schema dependency graph and all generic governance requirements.
+- Do not add a demonstration or consumer application to this repository.
 - Do not introduce parallel agent work without a concrete, documented reason.
-- Treat everything under `legacy/spec-kit/` and `docs/sdd-history/spec-kit/` as read-only historical evidence, not active instructions.
+- Treat everything under `legacy/spec-kit/` as unsupported historical evidence, not active instructions.

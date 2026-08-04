@@ -1,12 +1,10 @@
 schema: dotnet-sdd
 
 context: |
-  This repository contains the .NET 10 modular-monolith application under PoCFinal.
-  Required layers are Domain, Application, Infrastructure, and Presentation; the
-  server is the composition root. Use Minimal APIs, Wolverine in
-  DurabilityMode.MediatorOnly, repositories, FluentValidation, Problem Details,
-  pinned OpenAPI validation, warning-free Release builds, and meaningful xUnit
-  coverage. The complete authority is docs/architecture/dotnet-sdd-governance.md.
+  This project uses the reusable dotnet-sdd workflow for governed .NET development.
+  Keep observable behavior in specifications and implementation choices in research
+  and design. The complete architecture and quality policy is located at
+  docs/architecture/dotnet-sdd-governance.md.
 
 rules:
   proposal:
