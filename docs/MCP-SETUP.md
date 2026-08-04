@@ -1,5 +1,7 @@
 # Corporate MCP Setup (Windows, user scope)
 
+This optional repository-intelligence setup is independent of OpenSpec. OpenSpec itself has no runtime dependency on Python, `uv`, this MCP configuration, or generated graph files.
+
 Prerequisites:
 - Python >= 3.10
 - pip
@@ -34,6 +36,7 @@ Expected:
 Notes:
 - No administrator rights required.
 - No uv tooling required.
+- The active SDD workflow is the repository-root OpenSpec project; MCP servers provide discovery or documentation context only.
 - No PowerShell installer required.
 - Context7 is remote HTTP MCP for public docs only.
 - Graphify graph generation is local and code-only by default in this setup.

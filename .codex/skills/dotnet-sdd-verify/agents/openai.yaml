@@ -1,0 +1,4 @@
+interface:
+  display_name: ".NET SDD Verify"
+  short_description: "Run the repository verification gate"
+  default_prompt: "Use $dotnet-sdd-verify to validate OpenSpec and the .NET quality gate."

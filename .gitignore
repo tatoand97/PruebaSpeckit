@@ -14,4 +14,4 @@ TestResults/
 .vscode/*
 !.vscode/mcp.json
 graphify-out/
-
+artifacts/sdd-guard/
